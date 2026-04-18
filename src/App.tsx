@@ -1,6 +1,6 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Suspense, useState, useRef, useEffect } from 'react';
-import { useGLTF } from '@react-three/drei';
+import { useGLTF, Text } from '@react-three/drei';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import html2canvas from 'html2canvas';
@@ -690,117 +690,175 @@ function EngineRoom() {
         </mesh>
       </group>
 
-      {/* ── CONDENSER WATER SUPPLY (CDWS) — Green ── */}
-      <mesh position={[0, 0.6, 5]} rotation={[0, 0, Math.PI/2]}>
-        <cylinderGeometry args={[0.30, 0.30, 62, 12]} />
+      {/* ── COOLING TOWER ── */}
+      {/* Tower structure on ceiling — positioned at top-right of room */}
+      <group position={[25, 13, 6]}>
+        {/* Main tower shell — galvanized steel */}
+        <mesh castShadow receiveShadow>
+          <cylinderGeometry args={[1.8, 1.6, 5, 16]} />
+          <meshStandardMaterial color="#707070" roughness={0.6} metalness={0.8} />
+        </mesh>
+        {/* Tower top cap / fan ring */}
+        <mesh position={[0, 2.6, 0]}>
+          <cylinderGeometry args={[1.9, 1.8, 0.3, 16]} />
+          <meshStandardMaterial color="#505050" roughness={0.5} metalness={0.9} />
+        </mesh>
+        {/* Fan motor housing */}
+        <mesh position={[0, 2.9, 0]}>
+          <cylinderGeometry args={[0.5, 0.5, 0.6, 12]} />
+          <meshStandardMaterial color="#404040" roughness={0.4} metalness={0.8} />
+        </mesh>
+        {/* Fan blades */}
+        {[0, Math.PI/2, Math.PI, 3*Math.PI/2].map((a, i) => (
+          <mesh key={`blade-${i}`} position={[Math.cos(a)*0.7, 2.9, Math.sin(a)*0.7]} rotation={[0, a, 0]}>
+            <boxGeometry args={[1.2, 0.08, 0.25]} />
+            <meshStandardMaterial color="#888888" roughness={0.4} metalness={0.9} />
+          </mesh>
+        ))}
+        {/* Distribution basin at top — water enters here */}
+        <mesh position={[0, 2.2, 0]}>
+          <cylinderGeometry args={[1.6, 1.7, 0.4, 16]} />
+          <meshStandardMaterial color="#606060" roughness={0.5} metalness={0.7} />
+        </mesh>
+        {/* Basin distribution holes / nozzles */}
+        {[[0.8, 0], [-0.8, 0], [0, 0.8], [0, -0.8], [0.5, 0.5], [-0.5, -0.5]].map(([dx, dz], ni) => (
+          <mesh key={`nozzle-${ni}`} position={[dx, 2.0, dz]}>
+            <cylinderGeometry args={[0.06, 0.06, 0.3, 6]} />
+            <meshStandardMaterial color="#888" roughness={0.3} metalness={0.9} />
+          </mesh>
+        ))}
+        {/* Fill media section — structured packing inside */}
+        <mesh position={[0, 0.5, 0]}>
+          <cylinderGeometry args={[1.55, 1.55, 3.2, 16]} />
+          <meshStandardMaterial color="#3a5a3a" roughness={0.9} metalness={0.1} transparent opacity={0.7} />
+        </mesh>
+        {/* Cold water basin at bottom */}
+        <mesh position={[0, -2.2, 0]}>
+          <cylinderGeometry args={[1.7, 1.6, 0.5, 16]} />
+          <meshStandardMaterial color="#505050" roughness={0.6} metalness={0.7} />
+        </mesh>
+        {/* Basin screen / drift eliminator */}
+        <mesh position={[0, -1.8, 0]}>
+          <cylinderGeometry args={[1.55, 1.55, 0.15, 16]} />
+          <meshStandardMaterial color="#4a6a4a" roughness={0.9} metalness={0.2} />
+        </mesh>
+        {/* Tower leg supports */}
+        {[0, Math.PI/2, Math.PI, 3*Math.PI/2].map((a, li) => (
+          <mesh key={`tower-leg-${li}`} position={[Math.cos(a)*1.4, -2.6, Math.sin(a)*1.4]}>
+            <cylinderGeometry args={[0.08, 0.08, 1.5, 8]} />
+            <meshStandardMaterial color="#555" roughness={0.5} metalness={0.8} />
+          </mesh>
+        ))}
+        {/* Ladder access */}
+        <mesh position={[-1.9, 0, 0]}>
+          <cylinderGeometry args={[0.04, 0.04, 6, 6]} />
+          <meshStandardMaterial color="#666" roughness={0.6} metalness={0.7} />
+        </mesh>
+        {[0.5, 1.5, 2.5, 3.5, 4.5].map((yoff, ri) => (
+          <mesh key={`rung-${ri}`} position={[-1.9, yoff-2.6, 0]} rotation={[0, 0, Math.PI/2]}>
+            <cylinderGeometry args={[0.03, 0.03, 0.5, 6]} />
+            <meshStandardMaterial color="#777" roughness={0.5} metalness={0.8} />
+          </mesh>
+        ))}
+        {/* Tower label */}
+        <Text position={[0, 3.4, 0]} fontSize={0.35} color="#ffffff" anchorX="center" anchorY="middle">
+          COOLING TOWER
+        </Text>
+      </group>
+
+      {/* ── CDWS: Condenser Water Supply → COOLING TOWER (Green) ── */}
+      {/* Horizontal run along ceiling level from chiller to tower */}
+      <mesh position={[12, 12.5, 5]} rotation={[0, 0, Math.PI/2]}>
+        <cylinderGeometry args={[0.30, 0.30, 50, 12]} />
         <meshStandardMaterial color="#3a8a5a" roughness={0.7} metalness={0.3} />
       </mesh>
-      {/* Insulation — green foam jacket */}
-      <mesh position={[0, 0.6, 5]} rotation={[0, 0, Math.PI/2]}>
-        <cylinderGeometry args={[0.40, 0.40, 14, 12]} />
+      {/* CDWS insulation on ceiling run */}
+      <mesh position={[12, 12.5, 5]} rotation={[0, 0, Math.PI/2]}>
+        <cylinderGeometry args={[0.42, 0.42, 30, 12]} />
         <meshStandardMaterial color="#226644" roughness={0.9} metalness={0.0} transparent opacity={0.85} />
       </mesh>
-      {/* Pipe label marker */}
-      <mesh position={[15, 1.04, 5]} rotation={[0, 0, Math.PI/2]}>
-        <cylinderGeometry args={[0.31, 0.31, 0.8, 12]} />
-        <meshStandardMaterial color="#226644" roughness={0.8} />
-      </mesh>
-      {/* Vertical drop near chiller */}
-      <mesh position={[-2.5, 1.1, 5]}>
-        <cylinderGeometry args={[0.30, 0.30, 1.5, 12]} />
+      {/* Vertical drop from chiller UP to ceiling */}
+      <mesh position={[-2.5, 6.5, 5]}>
+        <cylinderGeometry args={[0.30, 0.30, 10.5, 12]} />
         <meshStandardMaterial color="#3a8a5a" roughness={0.7} metalness={0.3} />
       </mesh>
-      {/* Vertical insulation */}
-      <mesh position={[-2.5, 1.1, 5]}>
-        <cylinderGeometry args={[0.40, 0.40, 1.5, 12]} />
+      {/* Vertical insulation on CDWS drop */}
+      <mesh position={[-2.5, 6.5, 5]}>
+        <cylinderGeometry args={[0.42, 0.42, 10.5, 12]} />
         <meshStandardMaterial color="#226644" roughness={0.9} metalness={0.0} transparent opacity={0.85} />
       </mesh>
-      {/* Flange at chiller connection */}
+      {/* Elbow fitting at ceiling (horizontal to downward at chiller end) */}
+      <mesh position={[-2.5, 11.5, 5]} rotation={[Math.PI/2, 0, 0]}>
+        <torusGeometry args={[0.30, 0.08, 8, 12, Math.PI/2]} />
+        <meshStandardMaterial color="#b07030" roughness={0.2} metalness={1.0} />
+      </mesh>
+      {/* Flange at chiller connection (bottom) */}
       <mesh position={[-2.5, 1.9, 5]} rotation={[Math.PI/2, 0, 0]}>
         <cylinderGeometry args={[0.44, 0.44, 0.1, 12]} />
         <meshStandardMaterial color="#b07030" roughness={0.2} metalness={1.0} />
       </mesh>
-      {/* Flange at wall */}
-      <mesh position={[30, 0.6, 5]} rotation={[0, 0, Math.PI/2]}>
+      {/* Flange at tower connection (top) */}
+      <mesh position={[23.2, 12.5, 5]} rotation={[0, 0, Math.PI/2]}>
         <cylinderGeometry args={[0.44, 0.44, 0.12, 12]} />
-        <meshStandardMaterial color="#888" roughness={0.4} metalness={0.8} />
+        <meshStandardMaterial color="#b07030" roughness={0.2} metalness={1.0} />
       </mesh>
-      {/* Gate valve */}
-      <group position={[20, 0.6, 5]} rotation={[0, 0, Math.PI/2]}>
-        <mesh>
-          <cylinderGeometry args={[0.30, 0.30, 0.15, 12]} />
-          <meshStandardMaterial color="#3a8a5a" roughness={0.7} metalness={0.3} />
-        </mesh>
-        <mesh position={[0, 0.12, 0]}>
-          <cylinderGeometry args={[0.44, 0.44, 0.08, 12]} />
-          <meshStandardMaterial color="#b07030" roughness={0.2} metalness={1.0} />
-        </mesh>
-        <mesh position={[0, 0.25, 0]} rotation={[Math.PI/2, 0, 0]}>
-          <torusGeometry args={[0.2, 0.025, 8, 20]} />
-          <meshStandardMaterial color="#2244cc" roughness={0.5} metalness={0.7} />
-        </mesh>
-        <mesh position={[0, 0.25, 0.2]} rotation={[Math.PI/2, 0, 0]}>
-          <cylinderGeometry args={[0.025, 0.025, 0.4, 6]} />
-          <meshStandardMaterial color="#888" roughness={0.4} metalness={0.8} />
-        </mesh>
-      </group>
+      {/* CDWS Pipe label on ceiling run */}
+      <Text position={[15, 13.2, 5]} fontSize={0.22} color="#226644" anchorX="center" anchorY="bottom" rotation={[0, 0, Math.PI/2]}>
+        CDWS
+      </Text>
 
-      {/* ── CONDENSER WATER RETURN (CDWR) — Brown ── */}
-      <mesh position={[0, 0.6, 7]} rotation={[0, 0, Math.PI/2]}>
-        <cylinderGeometry args={[0.30, 0.30, 64, 12]} />
+      {/* ── CDWR: Condenser Water Return ← COOLING TOWER (Brown) ── */}
+      {/* Horizontal run from tower to chiller at ceiling level */}
+      <mesh position={[12, 12.0, 7]} rotation={[0, 0, Math.PI/2]}>
+        <cylinderGeometry args={[0.30, 0.30, 50, 12]} />
         <meshStandardMaterial color="#8a6040" roughness={0.7} metalness={0.3} />
       </mesh>
-      {/* Insulation — brown/tan foam jacket */}
-      <mesh position={[0, 0.6, 7]} rotation={[0, 0, Math.PI/2]}>
-        <cylinderGeometry args={[0.40, 0.40, 14, 12]} />
+      {/* CDWR insulation on ceiling run */}
+      <mesh position={[12, 12.0, 7]} rotation={[0, 0, Math.PI/2]}>
+        <cylinderGeometry args={[0.42, 0.42, 30, 12]} />
         <meshStandardMaterial color="#6a4422" roughness={0.9} metalness={0.0} transparent opacity={0.85} />
       </mesh>
-      {/* Pipe label marker */}
-      <mesh position={[15, 1.04, 7]} rotation={[0, 0, Math.PI/2]}>
-        <cylinderGeometry args={[0.31, 0.31, 0.8, 12]} />
-        <meshStandardMaterial color="#6a4422" roughness={0.8} />
-      </mesh>
-      {/* Vertical drop near chiller */}
-      <mesh position={[2.5, 1.1, 7]}>
-        <cylinderGeometry args={[0.30, 0.30, 1.5, 12]} />
+      {/* Vertical drop from ceiling DOWN to chiller */}
+      <mesh position={[2.5, 6.5, 7]}>
+        <cylinderGeometry args={[0.30, 0.30, 10.5, 12]} />
         <meshStandardMaterial color="#8a6040" roughness={0.7} metalness={0.3} />
       </mesh>
-      {/* Vertical insulation */}
-      <mesh position={[2.5, 1.1, 7]}>
-        <cylinderGeometry args={[0.40, 0.40, 1.5, 12]} />
+      {/* Vertical insulation on CDWR drop */}
+      <mesh position={[2.5, 6.5, 7]}>
+        <cylinderGeometry args={[0.42, 0.42, 10.5, 12]} />
         <meshStandardMaterial color="#6a4422" roughness={0.9} metalness={0.0} transparent opacity={0.85} />
+      </mesh>
+      {/* Elbow at ceiling */}
+      <mesh position={[2.5, 11.2, 7]} rotation={[Math.PI/2, 0, 0]}>
+        <torusGeometry args={[0.30, 0.08, 8, 12, Math.PI/2]} />
+        <meshStandardMaterial color="#b07030" roughness={0.2} metalness={1.0} />
       </mesh>
       {/* Flange at chiller connection */}
       <mesh position={[2.5, 1.9, 7]} rotation={[Math.PI/2, 0, 0]}>
         <cylinderGeometry args={[0.44, 0.44, 0.1, 12]} />
         <meshStandardMaterial color="#b07030" roughness={0.2} metalness={1.0} />
       </mesh>
-      {/* Flange at wall */}
-      <mesh position={[30, 0.6, 7]} rotation={[0, 0, Math.PI/2]}>
+      {/* Flange at tower connection */}
+      <mesh position={[23.2, 12.0, 7]} rotation={[0, 0, Math.PI/2]}>
         <cylinderGeometry args={[0.44, 0.44, 0.12, 12]} />
-        <meshStandardMaterial color="#888" roughness={0.4} metalness={0.8} />
+        <meshStandardMaterial color="#b07030" roughness={0.2} metalness={1.0} />
       </mesh>
-      {/* Gate valve */}
-      <group position={[20, 0.6, 7]} rotation={[0, 0, Math.PI/2]}>
-        <mesh>
-          <cylinderGeometry args={[0.30, 0.30, 0.15, 12]} />
-          <meshStandardMaterial color="#8a6040" roughness={0.7} metalness={0.3} />
-        </mesh>
-        <mesh position={[0, 0.12, 0]}>
-          <cylinderGeometry args={[0.44, 0.44, 0.08, 12]} />
-          <meshStandardMaterial color="#b07030" roughness={0.2} metalness={1.0} />
-        </mesh>
-        <mesh position={[0, 0.25, 0]} rotation={[Math.PI/2, 0, 0]}>
-          <torusGeometry args={[0.2, 0.025, 8, 20]} />
-          <meshStandardMaterial color="#2244cc" roughness={0.5} metalness={0.7} />
-        </mesh>
-        <mesh position={[0, 0.25, 0.2]} rotation={[Math.PI/2, 0, 0]}>
-          <cylinderGeometry args={[0.025, 0.025, 0.4, 6]} />
-          <meshStandardMaterial color="#888" roughness={0.4} metalness={0.8} />
-        </mesh>
-      </group>
+      {/* CDWR Pipe label on ceiling run */}
+      <Text position={[15, 12.7, 7]} fontSize={0.22} color="#6a4422" anchorX="center" anchorY="bottom" rotation={[0, 0, Math.PI/2]}>
+        CDWR
+      </Text>
 
-      {/* ── PIPE IDENTIFICATION LABELS (on walls) ── */}
+      {/* ── PIPE IDENTIFICATION LABELS ── */}
+      {/* CHWS — Blue */}
+      <Text position={[-15, 1.4, -5]} fontSize={0.2} color="#3a6fa8" anchorX="center" anchorY="middle">
+        CHWS
+      </Text>
+      {/* CHWR — Red */}
+      <Text position={[15, 1.4, -7]} fontSize={0.2} color="#c04040" anchorX="center" anchorY="middle">
+        CHWR
+      </Text>
+      {/* CDWS — Green (on ceiling run) */}
+      {/* CDWR — Brown (on ceiling run) */}      {/* ── PIPE IDENTIFICATION LABELS (on walls) ── */}
       {/* CHWS label on left wall */}
       <group position={[-34.2, 1.28, -5]} rotation={[0, Math.PI/2, 0]}>
         <mesh>
