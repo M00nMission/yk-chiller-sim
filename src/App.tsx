@@ -1,6 +1,8 @@
-import { Canvas } from '@react-three/fiber';
-import { Suspense, useState } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { Suspense, useState, useRef } from 'react';
 import { useGLTF } from '@react-three/drei';
+import { OrbitControls } from '@react-three/drei';
+import * as THREE from 'three';
 import { Scene } from './components/canvas/Scene';
 import { HMIPanel } from './components/ui/HMIPanel';
 import { CxAlloyWidget, CxAlloyPanel } from './components/ui/CxAlloyPanel';
@@ -9,24 +11,46 @@ import { ControlPanelUI } from './components/ui/ControlPanelUI';
 function EngineRoom() {
   return (
     <group>
-      {/* ─── FLOOR ─── */}
+      {/* ─── FLOOR — concrete slab ─── */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow>
         <planeGeometry args={[40, 40]} />
-        <meshStandardMaterial color="#4a4a4a" roughness={0.9} metalness={0.1} />
+        <meshStandardMaterial color="#8a8580" roughness={0.95} metalness={0.02} />
       </mesh>
 
-      {/* Floor grid lines */}
-      {Array.from({ length: 18 }).map((_, i) => (
-        <mesh key={`gx-${i}`} rotation={[-Math.PI / 2, 0, 0]} position={[i * 2 - 17, 0.002, 0]}>
-          <planeGeometry args={[0.025, 40]} />
-          <meshStandardMaterial color="#3d3d3d" roughness={0.95} />
+      {/* Concrete surface variation / noise layer */}
+      {([[-8, -8, '#7a7570'], [8, -8, '#8c8780'], [-8, 8, '#857f7a'], [8, 8, '#7d7875']] as [number, number, string][]).map(([x, z, c], i) => (
+        <mesh key={`cpatch-${i}`} rotation={[-Math.PI / 2, 0, 0]} position={[x, 0.001, z]}>
+          <planeGeometry args={[12, 12]} />
+          <meshStandardMaterial color={c} roughness={0.97} metalness={0.01} />
         </mesh>
       ))}
-      {Array.from({ length: 18 }).map((_, i) => (
-        <mesh key={`gz-${i}`} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.002, i * 2 - 17]}>
-          <planeGeometry args={[40, 0.025]} />
-          <meshStandardMaterial color="#3d3d3d" roughness={0.95} />
-        </mesh>
+
+      {/* Expansion joints — full depth cuts */}
+      {[-12, 0, 12].map((pos, i) => (
+        <group key={`ej-${i}`}>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[pos, 0.003, 0]}>
+            <planeGeometry args={[0.06, 40]} />
+            <meshStandardMaterial color="#5a5550" roughness={0.98} />
+          </mesh>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.003, pos]}>
+            <planeGeometry args={[40, 0.06]} />
+            <meshStandardMaterial color="#5a5550" roughness={0.98} />
+          </mesh>
+        </group>
+      ))}
+
+      {/* Expansion joint sealant (dark filler) */}
+      {[-12, 0, 12].map((pos, i) => (
+        <group key={`es-${i}`}>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[pos, 0.004, 0]}>
+            <planeGeometry args={[0.03, 40]} />
+            <meshStandardMaterial color="#1a1815" roughness={1.0} />
+          </mesh>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.004, pos]}>
+            <planeGeometry args={[40, 0.03]} />
+            <meshStandardMaterial color="#1a1815" roughness={1.0} />
+          </mesh>
+        </group>
       ))}
 
       {/* Safety stripe perimeter */}
@@ -937,8 +961,64 @@ function ChillerModel({ position }: { position: [number, number, number] }) {
   );
 }
 
+function HMIPanel3D({ onZoom }: { onZoom: () => void }) {
+  const texture = new THREE.TextureLoader().load('/hmi.png');
+  const meshRef = useRef<THREE.Mesh>(null);
+
+  return (
+    <group position={[3.5, 2.5, 0]}>
+      {/* Panel housing */}
+      <mesh castShadow>
+        <boxGeometry args={[1.2, 0.9, 0.08]} />
+        <meshStandardMaterial color="#1a1a1a" roughness={0.6} metalness={0.4} />
+      </mesh>
+      {/* Screen */}
+      <mesh
+        ref={meshRef}
+        position={[0, 0, 0.05]}
+        onClick={onZoom}
+        onPointerOver={() => { document.body.style.cursor = 'pointer'; }}
+        onPointerOut={() => { document.body.style.cursor = 'auto'; }}
+      >
+        <planeGeometry args={[1.1, 0.8]} />
+        <meshStandardMaterial map={texture} roughness={0.4} metalness={0.1} />
+      </mesh>
+    </group>
+  );
+}
+
+function CameraController({ zoomed }: { zoomed: boolean }) {
+  const { camera } = useThree();
+  const activeRef = useRef(false);
+  const progressRef = useRef(0);
+  const lastZoomRef = useRef(zoomed);
+
+  useFrame((_, delta) => {
+    if (zoomed !== lastZoomRef.current) {
+      lastZoomRef.current = zoomed;
+      activeRef.current = true;
+      progressRef.current = 0;
+    }
+
+    if (activeRef.current && progressRef.current < 1) {
+      progressRef.current = Math.min(progressRef.current + delta * 1.2, 1);
+      const t = progressRef.current;
+      const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      const fromPos = zoomed ? new THREE.Vector3(15, 10, 20) : new THREE.Vector3(5.5, 2.8, 3);
+      const toPos = zoomed ? new THREE.Vector3(5.5, 2.8, 3) : new THREE.Vector3(15, 10, 20);
+      camera.position.lerpVectors(fromPos, toPos, ease);
+      if (zoomed) {
+        camera.lookAt(3.5, 2.5, 0);
+      }
+    }
+  });
+
+  return null;
+}
+
 export default function App() {
   const [showCxAlloy, setShowCxAlloy] = useState(false);
+  const [zoomedHMI, setZoomedHMI] = useState(false);
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#0a0a0a', position: 'relative', overflow: 'hidden' }}>
@@ -954,8 +1034,8 @@ export default function App() {
         </div>
       )}
 
-      {/* HMI Panel */}
-      <HMIPanel />
+      {/* HMI Panel — hidden when zoomed into 3D HMI */}
+      {!zoomedHMI && <HMIPanel />}
 
       {/* 3D Canvas */}
       <div style={{ position: 'absolute', inset: 0 }}>
@@ -967,9 +1047,37 @@ export default function App() {
           <Suspense fallback={null}>
             <Scene />
             <EngineRoom />
+
+            {/* 3D HMI panel on chiller — click to zoom in */}
+            <HMIPanel3D onZoom={() => setZoomedHMI(true)} />
+
+            {/* Camera animation on HMI zoom */}
+            <CameraController zoomed={zoomedHMI} />
+
+            {/* Orbit controls — disable when zoomed */}
+            <OrbitControls
+              makeDefault
+              target={[0, 3, 0]}
+              minDistance={8}
+              maxDistance={50}
+              minPolarAngle={0.2}
+              maxPolarAngle={Math.PI / 2 - 0.1}
+              enableDamping
+              dampingFactor={0.05}
+              enabled={!zoomedHMI}
+              onChange={() => {}}
+            />
           </Suspense>
         </Canvas>
       </div>
+
+      {/* Zoom overlay — click anywhere to exit zoom */}
+      {zoomedHMI && (
+        <div
+          style={{ position: 'absolute', inset: 0, zIndex: 10, cursor: 'pointer' }}
+          onClick={() => setZoomedHMI(false)}
+        />
+      )}
     </div>
   );
 }

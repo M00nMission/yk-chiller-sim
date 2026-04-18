@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>York YK Chiller - Head Pressure Control Screen</title>
+<style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+        background: #3a2e18;
+        font-family: 'Arial', 'Helvetica', sans-serif;
+        color: #ddd;
+        height: 100vh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+
+    /* ====================== TOP BAR ====================== */
+    #topbar {
+        background: #000000;
+        border-bottom: 4px solid #222;
+        display: flex;
+        height: 82px;
+        font-size: 13px;
+    }
+    #tb-left {
+        flex: 1;
+        padding: 6px 12px;
+        border-right: 3px solid #222;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
+    .run-txt {
+        color: #00ff00;
+        font-size: 19px;
+        font-weight: bold;
+        letter-spacing: 2px;
+        text-shadow: 0 0 8px #00cc00;
+    }
+    .det-txt { color: #007700; font-size: 10px; letter-spacing: 1.5px; }
+    .mode-txt { 
+        color: #00ff00; 
+        font-size: 15px; 
+        font-weight: bold; 
+        letter-spacing: 1px; 
+    }
+    .scr-txt { 
+        color: #555; 
+        font-size: 11px; 
+        letter-spacing: 1px; 
+    }
+
+    #tb-mid {
+        padding: 8px 16px;
+        border-right: 3px solid #222;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+    }
+    .dtg {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1px;
+    }
+    .dtg-lbl {
+        color: #666;
+        font-size: 8px;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+    }
+    .dtg-val {
+        color: #eeeeee;
+        font-size: 14px;
+        font-weight: bold;
+    }
+
+    #tb-right {
+        padding: 10px 12px;
+    }
+
+    /* Arrow Button Style */
+    .abtn {
+        background: #1a5fb4;
+        border: 3px solid #5090e0;
+        border-right: none;
+        color: white;
+        font-family: 'Arial Black', sans-serif;
+        font-weight: 900;
+        font-size: 13px;
+        padding: 9px 14px 9px 16px;
+        cursor: pointer;
+        position: relative;
+        min-width: 98px;
+        text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+    }
+    .abtn::after {
+        content: '';
+        position: absolute;
+        right: -18px;
+        top: -3px;
+        bottom: -3px;
+        width: 18px;
+        background: #1a5fb4;
+        border-top: 3px solid #5090e0;
+        border-bottom: 3px solid #5090e0;
+        border-right: 3px solid #5090e0;
+        clip-path: polygon(0 0, 100% 50%, 0 100%);
+    }
+
+    /* ====================== MAIN AREA ====================== */
+    #main {
+        flex: 1;
+        display: flex;
+        padding: 12px;
+        gap: 12px;
+    }
+
+    #center {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    /* Temperature & Pressure Values */
+    .param {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: rgba(0,0,0,0.6);
+        padding: 6px 14px;
+        border: 2px solid #444;
+        font-size: 14px;
+    }
+    .param-label { color: #ccc; }
+    .param-value {
+        background: #000;
+        border: 2px inset #555;
+        color: #00ffcc;
+        font-weight: bold;
+        font-size: 16px;
+        padding: 2px 12px;
+        min-width: 118px;
+        text-align: right;
+    }
+
+    /* Chiller Graphic */
+    #graphic {
+        flex: 1;
+        background: #3a2e18;
+        border: 3px solid #2a2010;
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+    }
+    #chiller-img {
+        max-width: 98%;
+        max-height: 98%;
+        filter: contrast(1.05) saturate(1.1);
+    }
+
+    /* Overlay Values - Positioned exactly like screenshot */
+    .overlay {
+        position: absolute;
+        background: rgba(0,0,0,0.92);
+        border: 2px solid #555;
+        color: #00ffaa;
+        font-weight: bold;
+        padding: 4px 12px;
+        font-size: 15px;
+        text-align: center;
+        pointer-events: none;
+    }
+
+    /* Right Navigation */
+    #rnav {
+        width: 128px;
+        background: #0a0a0a;
+        border-left: 4px solid #1a1a1a;
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+    .rbtn {
+        background: #1a5fb4;
+        border: 3px solid #5090e0;
+        border-right: none;
+        color: white;
+        font-family: 'Arial Black', sans-serif;
+        font-weight: 900;
+        font-size: 12px;
+        padding: 11px 10px;
+        cursor: pointer;
+        position: relative;
+    }
+    .rbtn::after {
+        content: '';
+        position: absolute;
+        right: -15px;
+        top: -3px;
+        bottom: -3px;
+        width: 15px;
+        background: #1a5fb4;
+        border-top: 3px solid #5090e0;
+        border-bottom: 3px solid #5090e0;
+        border-right: 3px solid #5090e0;
+        clip-path: polygon(0 0, 100% 50%, 0 100%);
+    }
+    .rbtn.on {
+        background: #0e3a7a;
+        border-color: #88aaff;
+    }
+    .rbtn.on::after {
+        background: #0e3a7a;
+        border-color: #88aaff;
+    }
+
+    /* Bottom Bar */
+    #botbar {
+        background: #000;
+        border-top: 4px solid #1a1a1a;
+        padding: 8px 12px;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+    }
+    .botbtn {
+        background: #1a5fb4;
+        border: 3px solid #5090e0;
+        border-right: none;
+        color: white;
+        font-family: 'Arial Black', sans-serif;
+        font-weight: 900;
+        font-size: 12px;
+        padding: 7px 12px;
+        cursor: pointer;
+    }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+    <div id="tb-left">
+        <div class="run-txt">SYSTEM RUN</div>
+        <div class="det-txt">SYSTEM DETAILS</div>
+        <div class="mode-txt">LEAVING CHILLED LIQUID CONTROL</div>
+        <div class="scr-txt">HEAD PRESSURE CONTROL SCREEN</div>
+    </div>
+    <div id="tb-mid">
+        <div class="dtg">
+            <div class="dtg-lbl">DATE</div>
+            <div class="dtg-val" id="date">05 Dec 2012</div>
+        </div>
+        <div class="dtg">
+            <div class="dtg-lbl">TIME</div>
+            <div class="dtg-val" id="time">7:50 AM</div>
+        </div>
+        <div class="dtg">
+            <div class="dtg-lbl">CONTROL SOURCE</div>
+            <div class="dtg-val">Local</div>
+            <div class="dtg-lbl" style="margin-top:6px">ACCESS LEVEL</div>
+            <div class="dtg-val" style="color:#00ff88">Service</div>
+        </div>
+    </div>
+    <div id="tb-right">
+        <button class="abtn">Home</button>
+    </div>
+</div>
+
+<div id="main">
+    <div id="center">
+
+        <!-- Top Parameters -->
+        <div class="param">
+            <span class="param-label">Return Condenser Liquid Temperature</span>
+            <span class="param-value" id="ret-temp">85.0 °F</span>
+        </div>
+        <div class="param">
+            <span class="param-label">Leaving Condenser Liquid Temperature</span>
+            <span class="param-value" id="leave-temp">94.9 °F</span>
+        </div>
+
+        <!-- Graphic Container -->
+        <div id="graphic">
+            <img id="chiller-img" src="https://i.imgur.com/0vX7z8K.png" alt="York YK Chiller">
+
+            <!-- Exact overlays from screenshot -->
+            <div class="overlay" style="top: 38%; left: 39%; width: 168px;">
+                Delta P <span style="color:#ffdd44; font-size:18px;" id="delta-p">80.0 PSID</span>
+            </div>
+
+            <div class="overlay" style="top: 46%; left: 47%; width: 190px;">
+                Head Pressure Setpoint <span style="color:#ffdd44; font-size:18px;" id="hp-setpoint">30.0 PSID</span>
+            </div>
+
+            <!-- Right side labels -->
+            <div class="overlay" style="top: 52%; right: 8%; width: 168px; text-align:left; padding-left:20px;">
+                Head Pressure<br>Setpoint <span style="float:right; color:#ffdd44;" id="hp-right">30.0 PSID</span>
+            </div>
+
+            <div class="overlay" style="top: 68%; right: 8%; width: 168px; text-align:left; padding-left:20px;">
+                Minimum<br>Position <span style="float:right; color:#ffdd44;">10.0 %</span>
+            </div>
+
+            <div class="overlay" style="top: 82%; right: 8%; width: 168px; text-align:left; padding-left:20px;">
+                Shutdown<br>Position <span style="float:right; color:#ffdd44;">0.0 %</span>
+            </div>
+
+            <!-- Bottom left control valve -->
+            <div class="overlay" style="bottom: 18%; left: 12%; width: 140px; font-size:13px;">
+                Control Valve Output <span style="color:#00ff88; font-size:16px;" id="valve-out">0.0 %</span>
+            </div>
+            <div class="overlay" style="bottom: 8%; left: 12%; width: 140px; font-size:13px;">
+                Control Valve Control Mode <span style="color:#ffff00;">Auto</span>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Right Navigation -->
+    <div id="rnav">
+        <button class="rbtn on">Condenser</button>
+        <button class="rbtn">Evaporator</button>
+        <button class="rbtn">Compressor</button>
+        <button class="rbtn">Steam System</button>
+        <button class="rbtn">Capacity Control</button>
+        <button class="rbtn">Setpoints</button>
+        <button class="rbtn">History</button>
+    </div>
+</div>
+
+<div id="botbar">
+    <button class="botbtn">Type<br><span style="font-size:13px;">0-10V</span></button>
+    <button class="botbtn">Direction<br><span style="font-size:13px;">Direct</span></button>
+    <button class="botbtn">Set</button>
+    <button class="botbtn">Auto</button>
+    <button class="botbtn" style="margin-left:auto;">Change Setpoints</button>
+</div>
+
+<script>
+// Live Clock
+function updateClock() {
+    const d = new Date();
+    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    document.getElementById("date").textContent = 
+        `${String(d.getDate()).padStart(2,'0')} ${months[d.getMonth()]} ${d.getFullYear()}`;
+    
+    let h = d.getHours();
+    const ampm = h >= 12 ? "PM" : "AM";
+    h = h % 12 || 12;
+    document.getElementById("time").textContent = 
+        `${h}:${String(d.getMinutes()).padStart(2,'0')} ${ampm}`;
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// Gentle simulation
+setInterval(() => {
+    const valve = (Math.random() * 3).toFixed(1);
+    document.getElementById("valve-out").textContent = valve + " %";
+
+    const delta = (79.2 + Math.random() * 2).toFixed(1);
+    document.getElementById("delta-p").textContent = delta + " PSID";
+}, 1800);
+
+</script>
+
+</body>
+</html>

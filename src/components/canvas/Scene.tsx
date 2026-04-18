@@ -1,6 +1,4 @@
-import { useMemo } from 'react';
-import { useThree } from '@react-three/fiber';
-import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
+import { PerspectiveCamera } from '@react-three/drei';
 
 function LightingRig() {
   return (
@@ -44,33 +42,10 @@ function GridLines() {
   );
 }
 
-function CameraController() {
-  const { camera } = useThree();
-
-  useMemo(() => {
-    camera.position.set(15, 10, 20);
-    camera.lookAt(0, 3, 0);
-  }, [camera]);
-
-  return (
-    <OrbitControls
-      makeDefault
-      target={[0, 3, 0]}
-      minDistance={8}
-      maxDistance={50}
-      minPolarAngle={0.2}
-      maxPolarAngle={Math.PI / 2 - 0.1}
-      enableDamping
-      dampingFactor={0.05}
-    />
-  );
-}
-
 export function Scene() {
   return (
     <>
       <PerspectiveCamera makeDefault fov={45} near={0.1} far={200} />
-      <CameraController />
       <LightingRig />
       <Floor />
       <GridLines />
