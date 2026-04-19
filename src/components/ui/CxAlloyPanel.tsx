@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
+import { CxAlloyApp, CXALLOY_DOC_H, CXALLOY_DOC_W } from '../cxalloy/CxAlloyApp';
 import { useSimulationStore } from '../../store/useSimulationStore';
 
 export function CxAlloyPanel({ onClose }: { onClose?: () => void }) {
@@ -423,10 +424,622 @@ export function CxAlloyPanel({ onClose }: { onClose?: () => void }) {
   );
 }
 
-// Realistic iPad widget showing actual CxAlloy app screenshot
+/** iPad mini proportions (matches floating widget). */
+const IPAD_OUTER_W = 168;
+const IPAD_OUTER_H = 240;
+const IPAD_NOTCH_H = 28;
+const IPAD_SCREEN_W = 148;
+const IPAD_SCREEN_H = 198;
+
+function cxFitScale(screenW: number, screenH: number) {
+  return Math.min(screenW / CXALLOY_DOC_W, screenH / CXALLOY_DOC_H);
+}
+
+/** Pan limits: when the scaled doc is smaller than the viewport (letterbox), allow sliding within the slack; when larger, clamp to edges. */
+function clampPan(
+  x: number,
+  y: number,
+  viewportW: number,
+  viewportH: number,
+  scaledW: number,
+  scaledH: number,
+) {
+  const minX = Math.min(0, viewportW - scaledW);
+  const maxX = Math.max(0, viewportW - scaledW);
+  const minY = Math.min(0, viewportH - scaledH);
+  const maxY = Math.max(0, viewportH - scaledH);
+  return {
+    x: Math.min(maxX, Math.max(minX, x)),
+    y: Math.min(maxY, Math.max(minY, y)),
+  };
+}
+
+function centeredPan(viewportW: number, viewportH: number, scaledW: number, scaledH: number) {
+  const minX = Math.min(0, viewportW - scaledW);
+  const maxX = Math.max(0, viewportW - scaledW);
+  const minY = Math.min(0, viewportH - scaledH);
+  const maxY = Math.max(0, viewportH - scaledH);
+  return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+}
+
+const CX_ZOOM_MIN = 1;
+const CX_ZOOM_MAX = 4;
+const CX_ZOOM_STEP = 1.15;
+
+function zoomAroundViewportPoint(
+  vx: number,
+  vy: number,
+  prevZoom: number,
+  nextZoom: number,
+  screenW: number,
+  screenH: number,
+  panX: number,
+  panY: number,
+) {
+  const base = cxFitScale(screenW, screenH);
+  const S0 = base * prevZoom;
+  const S1 = base * nextZoom;
+  const docX = (vx - panX) / S0;
+  const docY = (vy - panY) / S0;
+  const nx = vx - docX * S1;
+  const ny = vy - docY * S1;
+  const sw = CXALLOY_DOC_W * S1;
+  const sh = CXALLOY_DOC_H * S1;
+  return clampPan(nx, ny, screenW, screenH, sw, sh);
+}
+
+/** Chassis + notch + screen bezel + home bar — same layout as {@link CxAlloyWidget}, scaled by `deviceScale`. */
+function IpadDeviceShell({
+  deviceScale,
+  screenChildren,
+  footerLabel,
+}: {
+  deviceScale: number;
+  screenChildren: React.ReactNode;
+  footerLabel?: string;
+}) {
+  const z = (n: number) => n * deviceScale;
+  const homeH = IPAD_OUTER_H - IPAD_NOTCH_H - IPAD_SCREEN_H;
+  return (
+    <div
+      style={{
+        position: 'relative',
+        width: z(IPAD_OUTER_W),
+        height: z(IPAD_OUTER_H),
+        background: 'linear-gradient(160deg, #2c2c2e 0%, #1a1a1c 40%, #0a0a0c 100%)',
+        border: `${deviceScale}px solid #3a3a3e`,
+        borderRadius: z(24),
+        boxShadow: '0 20px 60px rgba(0,0,0,0.85), 0 8px 20px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.08)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'flex-start',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          width: '100%',
+          height: z(IPAD_NOTCH_H),
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          paddingTop: z(6),
+          flexShrink: 0,
+        }}
+      >
+        <div
+          style={{
+            width: z(10),
+            height: z(10),
+            borderRadius: '50%',
+            background: '#0d0d0d',
+            border: `${Math.max(1, deviceScale)}px solid #2a2a2e`,
+            boxShadow: 'inset 0 0 3px rgba(0,0,0,1)',
+          }}
+        />
+      </div>
+      <div
+        style={{
+          width: z(IPAD_SCREEN_W),
+          height: z(IPAD_SCREEN_H),
+          borderRadius: z(8),
+          overflow: 'hidden',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(255,255,255,0.05)',
+          position: 'relative',
+          background: '#000',
+          flexShrink: 0,
+        }}
+      >
+        {screenChildren}
+      </div>
+      <div
+        style={{
+          height: z(homeH),
+          flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '100%',
+        }}
+      >
+        <div
+          style={{
+            width: z(64),
+            height: z(5),
+            background: 'rgba(255,255,255,0.18)',
+            borderRadius: z(2.5),
+            boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+          }}
+        />
+      </div>
+      {footerLabel !== undefined && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: z(5),
+            fontSize: z(7.5),
+            color: 'rgba(255,255,255,0.25)',
+            fontFamily: 'SF Pro Display, system-ui, -apple-system, sans-serif',
+            fontWeight: 400,
+            letterSpacing: 0.3,
+          }}
+        >
+          {footerLabel}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CxAlloyPannableScreen({
+  screenW,
+  screenH,
+}: {
+  screenW: number;
+  screenH: number;
+}) {
+  const baseS = cxFitScale(screenW, screenH);
+  const [zoom, setZoom] = useState(1);
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+
+  const effectiveS = baseS * zoom;
+  const scaledW = CXALLOY_DOC_W * effectiveS;
+  const scaledH = CXALLOY_DOC_H * effectiveS;
+
+  const minX = Math.min(0, screenW - scaledW);
+  const maxX = Math.max(0, screenW - scaledW);
+  const minY = Math.min(0, screenH - scaledH);
+  const maxY = Math.max(0, screenH - scaledH);
+  const canPan = maxX > minX + 0.5 || maxY > minY + 0.5;
+  const enableSurfacePan = canPan || zoom > CX_ZOOM_MIN + 1e-6;
+
+  const [pan, setPan] = useState(() => centeredPan(screenW, screenH, CXALLOY_DOC_W * baseS, CXALLOY_DOC_H * baseS));
+  const panRef = useRef(pan);
+  panRef.current = pan;
+
+  const rootRef = useRef<HTMLDivElement>(null);
+  const screenRef = useRef({ w: screenW, h: screenH });
+  screenRef.current = { w: screenW, h: screenH };
+
+  const dragRef = useRef<{
+    active: boolean;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    origX: number;
+    origY: number;
+  } | null>(null);
+
+  const pointersRef = useRef(
+    new Map<number, { clientX: number; clientY: number }>(),
+  );
+  const pinchRef = useRef<{
+    dist0: number;
+    zoom0: number;
+  } | null>(null);
+
+  useLayoutEffect(() => {
+    setPan((p) => clampPan(p.x, p.y, screenW, screenH, scaledW, scaledH));
+  }, [screenW, screenH, scaledW, scaledH]);
+
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const onWheel = (ev: WheelEvent) => {
+      if (!ev.ctrlKey && !ev.metaKey) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const { w, h } = screenRef.current;
+      const rect = el.getBoundingClientRect();
+      const vx = ev.clientX - rect.left;
+      const vy = ev.clientY - rect.top;
+      const zPrev = zoomRef.current;
+      const factor = Math.exp(-ev.deltaY * 0.002);
+      const zNext = Math.min(CX_ZOOM_MAX, Math.max(CX_ZOOM_MIN, zPrev * factor));
+      if (zNext === zPrev) return;
+      const nextPan = zoomAroundViewportPoint(
+        vx,
+        vy,
+        zPrev,
+        zNext,
+        w,
+        h,
+        panRef.current.x,
+        panRef.current.y,
+      );
+      setZoom(zNext);
+      setPan(nextPan);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  const pinchDist = (m: Map<number, { clientX: number; clientY: number }>) => {
+    const pts = [...m.values()];
+    if (pts.length < 2) return 0;
+    const dx = pts[0]!.clientX - pts[1]!.clientX;
+    const dy = pts[0]!.clientY - pts[1]!.clientY;
+    return Math.hypot(dx, dy);
+  };
+
+  const pinchMid = (m: Map<number, { clientX: number; clientY: number }>, rect: DOMRect) => {
+    const pts = [...m.values()];
+    const mx = (pts[0]!.clientX + pts[1]!.clientX) / 2 - rect.left;
+    const my = (pts[0]!.clientY + pts[1]!.clientY) / 2 - rect.top;
+    return { mx, my };
+  };
+
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      pointersRef.current.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+      const n = pointersRef.current.size;
+      const el = rootRef.current;
+      const rect = el?.getBoundingClientRect();
+
+      if (n === 2 && rect) {
+        dragRef.current = null;
+        const d0 = pinchDist(pointersRef.current);
+        if (d0 > 1) {
+          pinchRef.current = {
+            dist0: d0,
+            zoom0: zoomRef.current,
+          };
+        }
+        return;
+      }
+
+      const allowOneFingerPan = canPan || zoom > CX_ZOOM_MIN + 1e-6;
+      if (!allowOneFingerPan) return;
+
+      if (e.button !== 0 && e.pointerType !== 'touch' && e.pointerType !== 'pen') return;
+      if (e.pointerType === 'mouse' || e.pointerType === 'pen') {
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      }
+      dragRef.current = {
+        active: true,
+        pointerId: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        origX: panRef.current.x,
+        origY: panRef.current.y,
+      };
+    },
+    [canPan, zoom],
+  );
+
+  const onPointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      if (!pointersRef.current.has(e.pointerId)) return;
+      pointersRef.current.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+
+      const el = rootRef.current;
+      const rect = el?.getBoundingClientRect();
+      if (pointersRef.current.size === 2 && pinchRef.current && rect) {
+        const d = pinchDist(pointersRef.current);
+        const { dist0, zoom0 } = pinchRef.current;
+        if (d > 1 && dist0 > 1) {
+          const zNext = Math.min(CX_ZOOM_MAX, Math.max(CX_ZOOM_MIN, zoom0 * (d / dist0)));
+          const zPrev = zoomRef.current;
+          const { mx, my } = pinchMid(pointersRef.current, rect);
+          const nextPan = zoomAroundViewportPoint(
+            mx,
+            my,
+            zPrev,
+            zNext,
+            screenW,
+            screenH,
+            panRef.current.x,
+            panRef.current.y,
+          );
+          setZoom(zNext);
+          setPan(nextPan);
+        }
+        return;
+      }
+
+      const d = dragRef.current;
+      if (!d?.active || e.pointerId !== d.pointerId) return;
+      if (!(canPan || zoom > CX_ZOOM_MIN + 1e-6)) return;
+      const dx = e.clientX - d.startX;
+      const dy = e.clientY - d.startY;
+      setPan(clampPan(d.origX + dx, d.origY + dy, screenW, screenH, scaledW, scaledH));
+    },
+    [screenW, screenH, scaledW, scaledH, canPan, zoom],
+  );
+
+  const endPointer = useCallback((e: React.PointerEvent) => {
+    pointersRef.current.delete(e.pointerId);
+    if (pointersRef.current.size < 2) pinchRef.current = null;
+
+    const d = dragRef.current;
+    if (d && e.pointerId === d.pointerId) {
+      try {
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch {
+        /* not captured */
+      }
+      dragRef.current = null;
+    }
+  }, []);
+
+  const zoomFromCenter = useCallback(
+    (factor: number) => {
+      const vx = screenW / 2;
+      const vy = screenH / 2;
+      const zPrev = zoomRef.current;
+      const zNext = Math.min(CX_ZOOM_MAX, Math.max(CX_ZOOM_MIN, zPrev * factor));
+      if (zNext === zPrev) return;
+      const nextPan = zoomAroundViewportPoint(
+        vx,
+        vy,
+        zPrev,
+        zNext,
+        screenW,
+        screenH,
+        panRef.current.x,
+        panRef.current.y,
+      );
+      setZoom(zNext);
+      setPan(nextPan);
+    },
+    [screenW, screenH],
+  );
+
+  const resetView = useCallback(() => {
+    const sw = CXALLOY_DOC_W * baseS;
+    const sh = CXALLOY_DOC_H * baseS;
+    setZoom(1);
+    setPan(centeredPan(screenW, screenH, sw, sh));
+  }, [baseS, screenW, screenH]);
+
+  return (
+    <div
+      ref={rootRef}
+      role="application"
+      aria-label={
+        zoom > CX_ZOOM_MIN + 1e-6
+          ? 'CxAlloy — pinch or Ctrl+scroll to zoom, drag to pan'
+          : enableSurfacePan
+            ? 'CxAlloy — Ctrl+scroll to zoom, drag to pan'
+            : 'CxAlloy — Ctrl+scroll to zoom'
+      }
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={endPointer}
+      onPointerCancel={endPointer}
+      style={{
+        width: '100%',
+        height: '100%',
+        position: 'relative',
+        overflow: 'hidden',
+        touchAction: enableSurfacePan ? 'none' : 'auto',
+      }}
+    >
+      <div
+        style={{
+          position: 'absolute',
+          left: pan.x,
+          top: pan.y,
+          width: CXALLOY_DOC_W,
+          height: CXALLOY_DOC_H,
+          transform: `scale(${effectiveS})`,
+          transformOrigin: 'top left',
+        }}
+      >
+        <CxAlloyApp style={{ width: CXALLOY_DOC_W, height: CXALLOY_DOC_H }} />
+      </div>
+
+      <div
+        style={{
+          position: 'absolute',
+          right: 6,
+          bottom: 6,
+          zIndex: 20,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          padding: '4px 6px',
+          borderRadius: 10,
+          background: 'rgba(0,0,0,0.55)',
+          border: '1px solid rgba(255,255,255,0.12)',
+        }}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          aria-label="Zoom out"
+          onClick={() => zoomFromCenter(1 / CX_ZOOM_STEP)}
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: 8,
+            border: '1px solid rgba(255,255,255,0.2)',
+            background: 'rgba(40,40,44,0.95)',
+            color: '#fff',
+            fontSize: 18,
+            lineHeight: 1,
+            cursor: 'pointer',
+          }}
+        >
+          −
+        </button>
+        <button
+          type="button"
+          aria-label="Reset zoom and position"
+          onClick={resetView}
+          style={{
+            minWidth: 36,
+            height: 30,
+            padding: '0 6px',
+            borderRadius: 8,
+            border: '1px solid rgba(255,255,255,0.2)',
+            background: 'rgba(40,40,44,0.95)',
+            color: '#ddd',
+            fontSize: 11,
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          1×
+        </button>
+        <button
+          type="button"
+          aria-label="Zoom in"
+          onClick={() => zoomFromCenter(CX_ZOOM_STEP)}
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: 8,
+            border: '1px solid rgba(255,255,255,0.2)',
+            background: 'rgba(40,40,44,0.95)',
+            color: '#fff',
+            fontSize: 18,
+            lineHeight: 1,
+            cursor: 'pointer',
+          }}
+        >
+          +
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Full-screen overlay: same iPad proportions as the widget, scaled up and centered; pan inside the screen. */
+export function CxAlloyHtmlMaximized({ onClose }: { onClose: () => void }) {
+  const [viewport, setViewport] = useState(() => ({
+    w: typeof window !== 'undefined' ? window.innerWidth : 800,
+    h: typeof window !== 'undefined' ? window.innerHeight : 600,
+  }));
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  useEffect(() => {
+    const measure = () =>
+      setViewport({ w: window.innerWidth, h: window.innerHeight });
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, []);
+
+  const headerH = 48;
+  const margin = 20;
+  const maxOuterW = viewport.w - margin * 2;
+  const maxOuterH = viewport.h - headerH - margin * 2;
+  const deviceScale = Math.min(maxOuterW / IPAD_OUTER_W, maxOuterH / IPAD_OUTER_H, 5);
+  const screenW = IPAD_SCREEN_W * deviceScale;
+  const screenH = IPAD_SCREEN_H * deviceScale;
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        zIndex: 100,
+        display: 'flex',
+        flexDirection: 'column',
+        background: 'rgba(10,10,14,0.92)',
+        boxShadow: '0 0 80px rgba(0,0,0,0.75)',
+      }}
+    >
+      <div
+        style={{
+          flexShrink: 0,
+          height: headerH,
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 14px 0 18px',
+          gap: 12,
+          borderBottom: '1px solid #2a2a32',
+          background: 'linear-gradient(180deg, #25252c 0%, #1c1c22 100%)',
+        }}
+      >
+        <span
+          style={{
+            fontSize: 15,
+            fontWeight: 600,
+            color: '#f2f2f7',
+            fontFamily: "'SF Pro Display', system-ui, -apple-system, sans-serif",
+            letterSpacing: 0.2,
+          }}
+        >
+          CxAlloy
+        </span>
+        <span style={{ fontSize: 11, color: '#6e6e78' }}>Inspection</span>
+        <button
+          type="button"
+          onClick={onClose}
+          style={{
+            marginLeft: 'auto',
+            background: '#3a3a42',
+            border: '1px solid #4a4a55',
+            borderRadius: 8,
+            color: '#fff',
+            fontSize: 13,
+            fontWeight: 600,
+            padding: '8px 16px',
+            cursor: 'pointer',
+          }}
+        >
+          Done
+        </button>
+      </div>
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: margin,
+        }}
+      >
+        <IpadDeviceShell
+          deviceScale={deviceScale}
+          screenChildren={<CxAlloyPannableScreen screenW={screenW} screenH={screenH} />}
+        />
+      </div>
+    </div>
+  );
+}
+
+// Realistic iPad widget embedding the CxAlloy preview (same proportions as maximized view)
 export function CxAlloyWidget({ onOpen }: { onOpen: () => void }) {
+  const screenW = IPAD_SCREEN_W;
+  const screenH = IPAD_SCREEN_H;
+  const cxScale = cxFitScale(screenW, screenH);
+
   return (
     <motion.button
+      type="button"
       onClick={onOpen}
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
@@ -437,96 +1050,37 @@ export function CxAlloyWidget({ onOpen }: { onOpen: () => void }) {
         position: 'absolute',
         bottom: 24,
         right: 24,
-        width: 168,
-        height: 240,
-        background: 'linear-gradient(160deg, #2c2c2e 0%, #1a1a1c 40%, #0a0a0c 100%)',
-        border: '1px solid #3a3a3e',
-        borderRadius: 24,
-        boxShadow: '0 20px 60px rgba(0,0,0,0.85), 0 8px 20px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.08)',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'flex-start',
+        width: IPAD_OUTER_W,
+        height: IPAD_OUTER_H,
         padding: 0,
         cursor: 'pointer',
         zIndex: 50,
         userSelect: 'none',
-        overflow: 'hidden',
+        overflow: 'visible',
+        background: 'none',
+        border: 'none',
       }}
     >
-      {/* Top notch / camera area */}
-      <div style={{
-        width: '100%',
-        height: 28,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingTop: 6,
-        flexShrink: 0,
-      }}>
-        <div style={{
-          width: 10,
-          height: 10,
-          borderRadius: '50%',
-          background: '#0d0d0d',
-          border: '1px solid #2a2a2e',
-          boxShadow: 'inset 0 0 3px rgba(0,0,0,1)',
-        }} />
-      </div>
-
-      {/* iPad screen - actual CxAlloy screenshot */}
-      <div style={{
-        width: 148,
-        height: 198,
-        borderRadius: 8,
-        overflow: 'hidden',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(255,255,255,0.05)',
-        position: 'relative',
-        background: '#000',
-        flexShrink: 0,
-      }}>
-        <img
-          src="/cxalloy2.png"
-          alt="CxAlloy App"
-          style={{
-            width: '100%',
-            height: '100%',
-            objectFit: 'cover',
-            objectPosition: 'top',
-            display: 'block',
-          }}
-        />
-      </div>
-
-      {/* Home indicator */}
-      <div style={{
-        flex: 1,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: '100%',
-      }}>
-        <div style={{
-          width: 64,
-          height: 5,
-          background: 'rgba(255,255,255,0.18)',
-          borderRadius: 2.5,
-          boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
-        }} />
-      </div>
-
-      {/* Subtle app name */}
-      <div style={{
-        position: 'absolute',
-        bottom: 5,
-        fontSize: 7.5,
-        color: 'rgba(255,255,255,0.25)',
-        fontFamily: 'SF Pro Display, system-ui, -apple-system, sans-serif',
-        fontWeight: 400,
-        letterSpacing: 0.3,
-      }}>
-        CxAlloy
-      </div>
+      <IpadDeviceShell
+        deviceScale={1}
+        footerLabel="CxAlloy"
+        screenChildren={
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: CXALLOY_DOC_W,
+              height: CXALLOY_DOC_H,
+              transform: `scale(${cxScale})`,
+              transformOrigin: 'top left',
+              pointerEvents: 'none',
+            }}
+          >
+            <CxAlloyApp style={{ width: CXALLOY_DOC_W, height: CXALLOY_DOC_H }} />
+          </div>
+        }
+      />
     </motion.button>
   );
 }

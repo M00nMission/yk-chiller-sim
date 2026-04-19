@@ -1,4 +1,29 @@
+import { useLayoutEffect } from 'react';
+import { useThree } from '@react-three/fiber';
 import { PerspectiveCamera } from '@react-three/drei';
+import * as THREE from 'three';
+
+/** Orbit / framing pivot near the chiller body (model sits on y ≈ 0.8). */
+export const CHILLER_ORBIT_TARGET: [number, number, number] = [0, 2, 0];
+
+/** Default “walk up” view: in front (+Z), elevated, looking at the chiller center. */
+export const DEFAULT_SIM_CAMERA_POSITION: [number, number, number] = [0, 4.5, 18];
+
+function ChillerFramedCamera() {
+  const { camera } = useThree();
+  useLayoutEffect(() => {
+    camera.position.set(
+      DEFAULT_SIM_CAMERA_POSITION[0],
+      DEFAULT_SIM_CAMERA_POSITION[1],
+      DEFAULT_SIM_CAMERA_POSITION[2],
+    );
+    camera.lookAt(
+      new THREE.Vector3(CHILLER_ORBIT_TARGET[0], CHILLER_ORBIT_TARGET[1], CHILLER_ORBIT_TARGET[2]),
+    );
+    camera.updateMatrixWorld();
+  }, [camera]);
+  return null;
+}
 
 function LightingRig() {
   return (
@@ -33,6 +58,7 @@ export function Scene() {
   return (
     <>
       <PerspectiveCamera makeDefault fov={45} near={0.1} far={500} />
+      <ChillerFramedCamera />
       <LightingRig />
     </>
   );

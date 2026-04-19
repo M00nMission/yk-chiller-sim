@@ -1,0 +1,93 @@
+[data-cxalloy] * {box-sizing:border-box;margin:0;padding:0;}
+[data-cxalloy] {font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',sans-serif;}
+[data-cxalloy] .wrap {display:flex;width:100%;min-height:1100px;background:#f2f2f7;font-size:14px;position:relative;}
+[data-cxalloy] .left {width:358px;background:#fff;border-right:0.5px solid #c6c6c8;display:flex;flex-direction:column;flex-shrink:0;}
+[data-cxalloy] .left-nav {display:flex;align-items:center;justify-content:space-between;padding:8px 16px 0;}
+[data-cxalloy] .left-title {font-size:32px;font-weight:700;color:#000;padding:4px 16px 8px;}
+[data-cxalloy] .test-list {flex:1;overflow-y:auto;}
+[data-cxalloy] .ti {padding:10px 16px 8px;border-bottom:0.5px solid #e5e5ea;cursor:pointer;background:#fff;}
+[data-cxalloy] .ti.sel {background:#d9d9d9;}
+[data-cxalloy] .ti-top {display:flex;align-items:center;gap:7px;margin-bottom:5px;}
+[data-cxalloy] .badge {font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;letter-spacing:0.2px;white-space:nowrap;}
+[data-cxalloy] .b-pass {background:#34c759;color:#fff;}
+[data-cxalloy] .b-prog {background:#ff9500;color:#fff;}
+[data-cxalloy] .b-none {background:#8e8e93;color:#fff;}
+[data-cxalloy] .pbar-wrap {flex:1;height:5px;background:#e5e5ea;border-radius:3px;overflow:hidden;display:flex;}
+[data-cxalloy] .pbar-g {background:#34c759;height:100%;}
+[data-cxalloy] .pbar-r {background:#ff3b30;height:100%;}
+[data-cxalloy] .pbar-gray {background:#c7c7cc;height:100%;width:8%;}
+[data-cxalloy] .ti-num {font-size:13px;color:#8e8e93;margin-left:2px;}
+[data-cxalloy] .ti-name {font-size:16px;font-weight:600;color:#000;margin-bottom:2px;}
+[data-cxalloy] .ti-meta {font-size:13px;color:#8e8e93;}
+[data-cxalloy] .left-footer {display:flex;align-items:center;padding:10px 16px 14px;border-top:0.5px solid #c6c6c8;gap:16px;background:#fff;}
+[data-cxalloy] .right {flex:1;display:flex;flex-direction:column;background:#fff;position:relative;}
+[data-cxalloy] .right-nav {display:flex;align-items:center;padding:8px 12px;border-bottom:0.5px solid #c6c6c8;gap:10px;}
+[data-cxalloy] .rn-title {font-size:17px;font-weight:600;flex:1;text-align:center;}
+[data-cxalloy] .right-body {flex:1;overflow-y:auto;}
+[data-cxalloy] .r-status {display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:0.5px solid #e5e5ea;}
+[data-cxalloy] .r-badge {font-size:12px;font-weight:700;padding:4px 10px;border-radius:5px;}
+[data-cxalloy] .rb-pass {background:#34c759;color:#fff;}
+[data-cxalloy] .r-prog {flex:1;height:8px;background:#e5e5ea;border-radius:4px;overflow:hidden;}
+[data-cxalloy] .r-prog-fill {height:100%;background:#34c759;width:90%;border-radius:4px;}
+[data-cxalloy] .r-field {padding:9px 14px;border-bottom:0.5px solid #e5e5ea;}
+[data-cxalloy] .r-field-label {font-size:11px;font-weight:600;color:#8e8e93;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:3px;}
+[data-cxalloy] .r-field-val {font-size:15px;color:#000;display:flex;align-items:center;gap:5px;}
+[data-cxalloy] .attempts-hdr {font-size:13px;font-weight:700;color:#007aff;text-transform:uppercase;letter-spacing:0.6px;padding:10px 14px 6px;}
+[data-cxalloy] .attempt-card {margin:0 14px 10px;background:#dce8f8;border-radius:10px;padding:10px 12px;}
+[data-cxalloy] .ac-toprow {display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+[data-cxalloy] .ac-prog {flex:1;height:8px;background:#b0cfe8;border-radius:4px;overflow:hidden;}
+[data-cxalloy] .ac-prog-fill {width:88%;height:100%;background:#34c759;border-radius:4px;}
+[data-cxalloy] .ac-dots {color:#007aff;font-size:20px;cursor:pointer;line-height:1;letter-spacing:1px;}
+[data-cxalloy] .ac-title {font-size:16px;font-weight:600;color:#000;margin-bottom:6px;}
+[data-cxalloy] .ac-badge {display:inline-block;font-size:12px;font-weight:700;background:#34c759;color:#fff;padding:3px 10px;border-radius:5px;margin-bottom:6px;}
+[data-cxalloy] .ac-date {font-size:13px;color:#6b6b6b;}
+[data-cxalloy] .coll-row {display:flex;align-items:center;padding:13px 14px;border-bottom:0.5px solid #e5e5ea;cursor:pointer;}
+[data-cxalloy] .coll-label {font-size:15px;font-weight:600;color:#007aff;flex:1;}
+[data-cxalloy] .coll-count {font-size:15px;color:#8e8e93;margin-right:6px;}
+[data-cxalloy] .coll-chev {font-size:14px;color:#c7c7cc;}
+[data-cxalloy] .lines-hdr {display:flex;align-items:center;padding:12px 14px 8px;}
+[data-cxalloy] .lines-lbl {font-size:15px;font-weight:600;color:#007aff;flex:1;}
+[data-cxalloy] .lines-count {font-size:15px;color:#000;margin-right:6px;}
+[data-cxalloy] .lines-chev {color:#007aff;font-size:15px;}
+
+/* LINE ITEMS */
+[data-cxalloy] .line-item {padding:10px 14px 8px;border-bottom:0.5px solid #e5e5ea;}
+[data-cxalloy] .li-main-row {display:flex;align-items:flex-start;gap:8px;}
+[data-cxalloy] .li-num {font-size:15px;font-weight:500;color:#000;min-width:18px;padding-top:2px;flex-shrink:0;}
+
+/* circle for line 1 (radio style) */
+[data-cxalloy] .li-radio {width:24px;height:24px;border-radius:50%;border:1.5px solid #c7c7cc;flex-shrink:0;margin-top:1px;background:#fff;}
+
+/* green square checkbox for line 2 */
+[data-cxalloy] .li-checkbox {width:24px;height:24px;border-radius:5px;background:#34c759;flex-shrink:0;margin-top:1px;display:flex;align-items:center;justify-content:center;}
+
+[data-cxalloy] .li-body {flex:1;}
+[data-cxalloy] .li-label {font-size:12px;font-weight:600;color:#8e8e93;text-transform:uppercase;letter-spacing:0.3px;margin-bottom:3px;}
+[data-cxalloy] .li-title {font-size:14px;color:#000;line-height:1.35;margin-bottom:4px;display:flex;align-items:flex-start;gap:3px;}
+[data-cxalloy] .add-val-btn {background:#dce8f8;color:#007aff;border:none;border-radius:7px;padding:5px 12px;font-size:14px;cursor:pointer;margin-bottom:4px;display:inline-block;}
+[data-cxalloy] .li-attr-note {font-size:14px;color:#8e8e93;margin-top:2px;}
+[data-cxalloy] .li-actions {display:flex;align-items:center;gap:8px;margin-top:8px;justify-content:flex-end;}
+[data-cxalloy] .li-act-btn {display:flex;align-items:center;gap:5px;font-size:14px;color:#8e8e93;background:#f2f2f7;border-radius:7px;padding:5px 10px;border:none;cursor:pointer;}
+[data-cxalloy] .li-act-btn.blue-btn {background:#dce8f8;color:#007aff;}
+[data-cxalloy] .pencil-btn {background:#f2f2f7;border-radius:7px;padding:5px 10px;font-size:15px;color:#555;border:none;cursor:pointer;}
+
+/* YES/NO/NA row — inline next to checkbox */
+[data-cxalloy] .yn-wrap {display:flex;border-radius:7px;overflow:hidden;border:0.5px solid #c7c7cc;margin-bottom:6px;}
+[data-cxalloy] .yn-btn {flex:1;padding:5px 0;text-align:center;font-size:14px;font-weight:600;background:#fff;border:none;cursor:pointer;color:#000;}
+[data-cxalloy] .yn-btn+.yn-btn {border-left:0.5px solid #c7c7cc;}
+[data-cxalloy] .yn-btn.yes-sel {background:#007aff;color:#fff;}
+[data-cxalloy] .li-verify {font-size:14px;color:#000;line-height:1.4;margin-bottom:5px;}
+[data-cxalloy] .li-yoo {font-size:14px;color:#8e8e93;background:#f2f2f7;border-radius:6px;padding:5px 10px;display:inline-block;margin-bottom:4px;}
+
+[data-cxalloy] .setpoint-row {display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:#e5e5ea;}
+[data-cxalloy] .setpoint-lbl {font-size:13px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:0.5px;}
+[data-cxalloy] .btoolbar {display:flex;justify-content:space-around;padding:8px 0 16px;border-top:0.5px solid #c6c6c8;background:#fff;}
+[data-cxalloy] .tb-btn {display:flex;flex-direction:column;align-items:center;gap:3px;background:none;border:none;cursor:pointer;color:#8e8e93;}
+[data-cxalloy] .tb-lbl {font-size:10px;font-weight:500;letter-spacing:0.5px;text-transform:uppercase;}
+[data-cxalloy] .dropdown {position:absolute;top:46px;right:8px;background:#fff;border-radius:13px;box-shadow:0 8px 30px rgba(0,0,0,0.22);z-index:200;width:230px;overflow:hidden;}
+[data-cxalloy] .dd-item {display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-bottom:0.5px solid #e5e5ea;cursor:pointer;font-size:16px;color:#000;}
+[data-cxalloy] .dd-item:last-child {border-bottom:none;}
+[data-cxalloy] .dd-item.dd-disabled {color:#c7c7cc;}
+[data-cxalloy] .dd-icon {font-size:18px;color:#3a3a3c;}
+[data-cxalloy] .dd-item.dd-disabled .dd-icon {color:#d1d1d6;}
+[data-cxalloy] .dd-chev {font-size:14px;color:#c7c7cc;}

@@ -1,15 +1,34 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Suspense, useState, useRef, useEffect } from 'react';
-import { useGLTF, Text } from '@react-three/drei';
-import { OrbitControls } from '@react-three/drei';
+import { Suspense, useState, useRef, useEffect, useLayoutEffect, type MutableRefObject } from 'react';
+import { useGLTF, Text, OrbitControls, Html } from '@react-three/drei';
 import * as THREE from 'three';
-import html2canvas from 'html2canvas';
-import { Scene } from './components/canvas/Scene';
-import { HMIPanel } from './components/ui/HMIPanel';
-import { CxAlloyWidget, CxAlloyPanel } from './components/ui/CxAlloyPanel';
+import { Scene, CHILLER_ORBIT_TARGET, DEFAULT_SIM_CAMERA_POSITION } from './components/canvas/Scene';
+import { InspectRaycaster } from './components/canvas/InspectRaycaster';
+import { CxAlloyWidget, CxAlloyHtmlMaximized } from './components/ui/CxAlloyPanel';
 import { ControlPanelUI } from './components/ui/ControlPanelUI';
 
-function EngineRoom() {
+function EngineRoom({
+  onHmiZoom,
+  hmiLookAtRef,
+}: {
+  onHmiZoom: () => void;
+  hmiLookAtRef: MutableRefObject<THREE.Vector3>;
+}) {
+  /* Chiller_R2.glb heat exchanger shells: two parallel barrels along ±Z; centers x≈0 and −2.09 */
+  const CHW_X_SUPPLY = -2.09;
+  const CHW_X_RETURN = 0;
+  const CHW_Z_SUPPLY = -4.82;
+  const CHW_Z_RETURN = -4.62;
+  const CHW_Y_FLANGE = 2.42;
+  const CW_X_SUPPLY = 0.33;
+  const CW_X_RETURN = -2.05;
+  const CW_Z_SUPPLY = 4.78;
+  const CW_Z_RETURN = 4.58;
+  const CW_TOWER_Z = (CW_Z_SUPPLY + CW_Z_RETURN) / 2;
+  /** Toward compressor / motor end of shells (between barrel −Z head and machine center) */
+  const CHW_STUB_Z_IN = -2.0;
+  const CW_STUB_Z_IN = 2.15;
+
   return (
     <group>
       {/* ─── CONCRETE FLOOR SLAB ─── */}
@@ -578,44 +597,44 @@ function EngineRoom() {
           CHILLED WATER & CONDENSER WATER PIPING
       ═══════════════════════════════════════════════ */}
 
-      {/* ── CHILLED WATER SUPPLY (CHWS) — Blue ── */}
+      {/* ── CHILLED WATER SUPPLY (CHWS) — Blue — aligned to −X barrel head at z≈−4.76 ── */}
       {/* Horizontal run from chiller to left wall */}
-      <mesh position={[0, 0.8, -5]} rotation={[0, 0, Math.PI/2]}>
+      <mesh position={[0, 0.8, CHW_Z_SUPPLY]} rotation={[0, 0, Math.PI/2]}>
         <cylinderGeometry args={[0.35, 0.35, 60, 12]} />
         <meshStandardMaterial color="#3a6fa8" roughness={0.7} metalness={0.3} />
       </mesh>
       {/* Insulation — blue closed-cell foam jacket */}
-      <mesh position={[0, 0.8, -5]} rotation={[0, 0, Math.PI/2]}>
+      <mesh position={[0, 0.8, CHW_Z_SUPPLY]} rotation={[0, 0, Math.PI/2]}>
         <cylinderGeometry args={[0.44, 0.44, 16, 12]} />
         <meshStandardMaterial color="#2255aa" roughness={0.9} metalness={0.0} transparent opacity={0.85} />
       </mesh>
       {/* Pipe label marker */}
-      <mesh position={[-15, 1.28, -5]} rotation={[0, 0, Math.PI/2]}>
+      <mesh position={[-15, 1.28, CHW_Z_SUPPLY]} rotation={[0, 0, Math.PI/2]}>
         <cylinderGeometry args={[0.36, 0.36, 0.8, 12]} />
         <meshStandardMaterial color="#1144aa" roughness={0.8} />
       </mesh>
       {/* Vertical drop near chiller */}
-      <mesh position={[-2.5, 1.4, -5]}>
+      <mesh position={[CHW_X_SUPPLY, 1.4, CHW_Z_SUPPLY]}>
         <cylinderGeometry args={[0.35, 0.35, 2.0, 12]} />
         <meshStandardMaterial color="#3a6fa8" roughness={0.7} metalness={0.3} />
       </mesh>
       {/* Vertical insulation */}
-      <mesh position={[-2.5, 1.4, -5]}>
+      <mesh position={[CHW_X_SUPPLY, 1.4, CHW_Z_SUPPLY]}>
         <cylinderGeometry args={[0.44, 0.44, 2.0, 12]} />
         <meshStandardMaterial color="#2255aa" roughness={0.9} metalness={0.0} transparent opacity={0.85} />
       </mesh>
       {/* Flange at chiller connection */}
-      <mesh position={[-2.5, 2.5, -5]} rotation={[Math.PI/2, 0, 0]}>
+      <mesh position={[CHW_X_SUPPLY, CHW_Y_FLANGE, CHW_Z_SUPPLY]} rotation={[Math.PI/2, 0, 0]}>
         <cylinderGeometry args={[0.5, 0.5, 0.1, 12]} />
         <meshStandardMaterial color="#b07030" roughness={0.2} metalness={1.0} />
       </mesh>
       {/* Flange at wall penetration */}
-      <mesh position={[-30, 0.8, -5]} rotation={[0, 0, Math.PI/2]}>
+      <mesh position={[-30, 0.8, CHW_Z_SUPPLY]} rotation={[0, 0, Math.PI/2]}>
         <cylinderGeometry args={[0.5, 0.5, 0.12, 12]} />
         <meshStandardMaterial color="#888" roughness={0.4} metalness={0.8} />
       </mesh>
       {/* Gate valve on supply line */}
-      <group position={[-20, 0.8, -5]} rotation={[0, 0, Math.PI/2]}>
+      <group position={[-20, 0.8, CHW_Z_SUPPLY]} rotation={[0, 0, Math.PI/2]}>
         <mesh>
           <cylinderGeometry args={[0.35, 0.35, 0.15, 12]} />
           <meshStandardMaterial color="#3a6fa8" roughness={0.7} metalness={0.3} />
@@ -635,43 +654,43 @@ function EngineRoom() {
         </mesh>
       </group>
 
-      {/* ── CHILLED WATER RETURN (CHWR) — Red ── */}
-      <mesh position={[0, 0.8, -7]} rotation={[0, 0, Math.PI/2]}>
+      {/* ── CHILLED WATER RETURN (CHWR) — Red — aligned to center barrel head ── */}
+      <mesh position={[0, 0.8, CHW_Z_RETURN]} rotation={[0, 0, Math.PI/2]}>
         <cylinderGeometry args={[0.35, 0.35, 62, 12]} />
         <meshStandardMaterial color="#c04040" roughness={0.7} metalness={0.3} />
       </mesh>
       {/* Insulation — red closed-cell foam jacket */}
-      <mesh position={[0, 0.8, -7]} rotation={[0, 0, Math.PI/2]}>
+      <mesh position={[0, 0.8, CHW_Z_RETURN]} rotation={[0, 0, Math.PI/2]}>
         <cylinderGeometry args={[0.44, 0.44, 16, 12]} />
         <meshStandardMaterial color="#aa2020" roughness={0.9} metalness={0.0} transparent opacity={0.85} />
       </mesh>
       {/* Pipe label marker */}
-      <mesh position={[-15, 1.28, -7]} rotation={[0, 0, Math.PI/2]}>
+      <mesh position={[-15, 1.28, CHW_Z_RETURN]} rotation={[0, 0, Math.PI/2]}>
         <cylinderGeometry args={[0.36, 0.36, 0.8, 12]} />
         <meshStandardMaterial color="#aa2020" roughness={0.8} />
       </mesh>
       {/* Vertical drop near chiller */}
-      <mesh position={[2.5, 1.4, -7]}>
+      <mesh position={[CHW_X_RETURN, 1.4, CHW_Z_RETURN]}>
         <cylinderGeometry args={[0.35, 0.35, 2.0, 12]} />
         <meshStandardMaterial color="#c04040" roughness={0.7} metalness={0.3} />
       </mesh>
       {/* Vertical insulation */}
-      <mesh position={[2.5, 1.4, -7]}>
+      <mesh position={[CHW_X_RETURN, 1.4, CHW_Z_RETURN]}>
         <cylinderGeometry args={[0.44, 0.44, 2.0, 12]} />
         <meshStandardMaterial color="#aa2020" roughness={0.9} metalness={0.0} transparent opacity={0.85} />
       </mesh>
       {/* Flange at chiller connection */}
-      <mesh position={[2.5, 2.5, -7]} rotation={[Math.PI/2, 0, 0]}>
+      <mesh position={[CHW_X_RETURN, CHW_Y_FLANGE, CHW_Z_RETURN]} rotation={[Math.PI/2, 0, 0]}>
         <cylinderGeometry args={[0.5, 0.5, 0.1, 12]} />
         <meshStandardMaterial color="#b07030" roughness={0.2} metalness={1.0} />
       </mesh>
       {/* Flange at wall */}
-      <mesh position={[-30, 0.8, -7]} rotation={[0, 0, Math.PI/2]}>
+      <mesh position={[-30, 0.8, CHW_Z_RETURN]} rotation={[0, 0, Math.PI/2]}>
         <cylinderGeometry args={[0.5, 0.5, 0.12, 12]} />
         <meshStandardMaterial color="#888" roughness={0.4} metalness={0.8} />
       </mesh>
       {/* Gate valve on return line */}
-      <group position={[-20, 0.8, -7]} rotation={[0, 0, Math.PI/2]}>
+      <group position={[-20, 0.8, CHW_Z_RETURN]} rotation={[0, 0, Math.PI/2]}>
         <mesh>
           <cylinderGeometry args={[0.35, 0.35, 0.15, 12]} />
           <meshStandardMaterial color="#c04040" roughness={0.7} metalness={0.3} />
@@ -690,13 +709,86 @@ function EngineRoom() {
         </mesh>
       </group>
 
-      {/* ── COOLING TOWER ── */}
-      {/* Tower structure on ceiling — positioned at top-right of room */}
-      <group position={[25, 13, 6]}>
+      {/* ─── ROOFTOP DECK (above machine room walls, y≈12) ─── */}
+      <group position={[0, 12.05, 0]}>
+        <mesh receiveShadow castShadow>
+          <boxGeometry args={[72, 0.38, 72]} />
+          <meshStandardMaterial color="#8c8880" roughness={0.92} metalness={0.04} />
+        </mesh>
+        {/* Parapet */}
+        <mesh position={[0, 0.32, -36.1]}>
+          <boxGeometry args={[74, 0.65, 0.35]} />
+          <meshStandardMaterial color="#6a6862" roughness={0.9} metalness={0.06} />
+        </mesh>
+        <mesh position={[0, 0.32, 36.1]}>
+          <boxGeometry args={[74, 0.65, 0.35]} />
+          <meshStandardMaterial color="#6a6862" roughness={0.9} metalness={0.06} />
+        </mesh>
+        <mesh position={[-36.1, 0.32, 0]}>
+          <boxGeometry args={[0.35, 0.65, 74]} />
+          <meshStandardMaterial color="#6a6862" roughness={0.9} metalness={0.06} />
+        </mesh>
+        <mesh position={[36.1, 0.32, 0]}>
+          <boxGeometry args={[0.35, 0.65, 74]} />
+          <meshStandardMaterial color="#6a6862" roughness={0.9} metalness={0.06} />
+        </mesh>
+        {/* Roof curb around tower footprint */}
+        <mesh position={[25, 0.28, CW_TOWER_Z]}>
+          <boxGeometry args={[5.2, 0.45, 5.2]} />
+          <meshStandardMaterial color="#5a5854" roughness={0.88} metalness={0.08} />
+        </mesh>
+        <mesh position={[25, 0.32, CW_TOWER_Z]}>
+          <boxGeometry args={[4.4, 0.35, 4.4]} />
+          <meshStandardMaterial color="#7a7670" roughness={0.9} metalness={0.05} />
+        </mesh>
+      </group>
+      {/* Roof penetrations (sleeves) */}
+      <mesh position={[CW_X_SUPPLY, 12.02, CW_Z_SUPPLY]}>
+        <cylinderGeometry args={[0.48, 0.52, 0.45, 12]} />
+        <meshStandardMaterial color="#555" roughness={0.65} metalness={0.5} />
+      </mesh>
+      <mesh position={[CW_X_RETURN, 12.02, CW_Z_RETURN]}>
+        <cylinderGeometry args={[0.48, 0.52, 0.45, 12]} />
+        <meshStandardMaterial color="#555" roughness={0.65} metalness={0.5} />
+      </mesh>
+
+      {/* ── COOLING TOWER (rooftop) — basin bottom flush with deck top y≈12.24 ── */}
+      <group position={[25, 14.68, CW_TOWER_Z]}>
+        {/* Concrete housekeeping pad */}
+        <mesh position={[0, -2.52, 0]} receiveShadow>
+          <boxGeometry args={[4.2, 0.22, 4.2]} />
+          <meshStandardMaterial color="#9a958e" roughness={0.95} metalness={0.02} />
+        </mesh>
+        {/* Guardrail around pad */}
+        {[0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2].map((a, gi) => (
+          <group key={`ct-rail-${gi}`} position={[Math.cos(a) * 2.15, -2.35, Math.sin(a) * 2.15]} rotation={[0, a, 0]}>
+            <mesh position={[0, 0.35, 0]}>
+              <boxGeometry args={[1.2, 0.08, 0.08]} />
+              <meshStandardMaterial color="#c8a030" roughness={0.5} metalness={0.4} />
+            </mesh>
+            <mesh position={[0, 0.7, 0]}>
+              <boxGeometry args={[1.2, 0.06, 0.06]} />
+              <meshStandardMaterial color="#c8a030" roughness={0.5} metalness={0.4} />
+            </mesh>
+            <mesh position={[-0.55, 0.35, 0]}>
+              <cylinderGeometry args={[0.04, 0.04, 0.75, 6]} />
+              <meshStandardMaterial color="#b8a028" roughness={0.45} metalness={0.5} />
+            </mesh>
+            <mesh position={[0.55, 0.35, 0]}>
+              <cylinderGeometry args={[0.04, 0.04, 0.75, 6]} />
+              <meshStandardMaterial color="#b8a028" roughness={0.45} metalness={0.5} />
+            </mesh>
+          </group>
+        ))}
         {/* Main tower shell — galvanized steel */}
         <mesh castShadow receiveShadow>
           <cylinderGeometry args={[1.8, 1.6, 5, 16]} />
           <meshStandardMaterial color="#707070" roughness={0.6} metalness={0.8} />
+        </mesh>
+        {/* Louvered air inlet band */}
+        <mesh position={[0, -1.35, 0]}>
+          <cylinderGeometry args={[1.82, 1.78, 1.1, 20]} />
+          <meshStandardMaterial color="#4a4a48" roughness={0.75} metalness={0.35} />
         </mesh>
         {/* Tower top cap / fan ring */}
         <mesh position={[0, 2.6, 0]}>
@@ -709,8 +801,8 @@ function EngineRoom() {
           <meshStandardMaterial color="#404040" roughness={0.4} metalness={0.8} />
         </mesh>
         {/* Fan blades */}
-        {[0, Math.PI/2, Math.PI, 3*Math.PI/2].map((a, i) => (
-          <mesh key={`blade-${i}`} position={[Math.cos(a)*0.7, 2.9, Math.sin(a)*0.7]} rotation={[0, a, 0]}>
+        {[0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2].map((a, i) => (
+          <mesh key={`blade-${i}`} position={[Math.cos(a) * 0.7, 2.9, Math.sin(a) * 0.7]} rotation={[0, a, 0]}>
             <boxGeometry args={[1.2, 0.08, 0.25]} />
             <meshStandardMaterial color="#888888" roughness={0.4} metalness={0.9} />
           </mesh>
@@ -742,10 +834,10 @@ function EngineRoom() {
           <cylinderGeometry args={[1.55, 1.55, 0.15, 16]} />
           <meshStandardMaterial color="#4a6a4a" roughness={0.9} metalness={0.2} />
         </mesh>
-        {/* Tower leg supports */}
-        {[0, Math.PI/2, Math.PI, 3*Math.PI/2].map((a, li) => (
-          <mesh key={`tower-leg-${li}`} position={[Math.cos(a)*1.4, -2.6, Math.sin(a)*1.4]}>
-            <cylinderGeometry args={[0.08, 0.08, 1.5, 8]} />
+        {/* Tower leg supports — bearing on pad */}
+        {[0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2].map((a, li) => (
+          <mesh key={`tower-leg-${li}`} position={[Math.cos(a) * 1.4, -2.6, Math.sin(a) * 1.4]}>
+            <cylinderGeometry args={[0.1, 0.12, 0.35, 8]} />
             <meshStandardMaterial color="#555" roughness={0.5} metalness={0.8} />
           </mesh>
         ))}
@@ -755,7 +847,7 @@ function EngineRoom() {
           <meshStandardMaterial color="#666" roughness={0.6} metalness={0.7} />
         </mesh>
         {[0.5, 1.5, 2.5, 3.5, 4.5].map((yoff, ri) => (
-          <mesh key={`rung-${ri}`} position={[-1.9, yoff-2.6, 0]} rotation={[0, 0, Math.PI/2]}>
+          <mesh key={`rung-${ri}`} position={[-1.9, yoff - 2.6, 0]} rotation={[0, 0, Math.PI / 2]}>
             <cylinderGeometry args={[0.03, 0.03, 0.5, 6]} />
             <meshStandardMaterial color="#777" roughness={0.5} metalness={0.8} />
           </mesh>
@@ -766,101 +858,100 @@ function EngineRoom() {
         </Text>
       </group>
 
-      {/* ── CDWS: Condenser Water Supply → COOLING TOWER (Green) ── */}
-      {/* Horizontal run along ceiling level from chiller to tower */}
-      <mesh position={[12, 12.5, 5]} rotation={[0, 0, Math.PI/2]}>
-        <cylinderGeometry args={[0.30, 0.30, 50, 12]} />
+      {/* ── CDWS: Condenser Water Supply — riser from +Z barrel nozzle line (x≈0.33) ── */}
+      <mesh position={[CW_X_SUPPLY, 7.14, CW_Z_SUPPLY]}>
+        <cylinderGeometry args={[0.3, 0.3, 10.48, 12]} />
         <meshStandardMaterial color="#3a8a5a" roughness={0.7} metalness={0.3} />
       </mesh>
-      {/* CDWS insulation on ceiling run */}
-      <mesh position={[12, 12.5, 5]} rotation={[0, 0, Math.PI/2]}>
-        <cylinderGeometry args={[0.42, 0.42, 30, 12]} />
+      <mesh position={[CW_X_SUPPLY, 7.14, CW_Z_SUPPLY]}>
+        <cylinderGeometry args={[0.42, 0.42, 8.2, 12]} />
         <meshStandardMaterial color="#226644" roughness={0.9} metalness={0.0} transparent opacity={0.85} />
       </mesh>
-      {/* Vertical drop from chiller UP to ceiling */}
-      <mesh position={[-2.5, 6.5, 5]}>
-        <cylinderGeometry args={[0.30, 0.30, 10.5, 12]} />
-        <meshStandardMaterial color="#3a8a5a" roughness={0.7} metalness={0.3} />
-      </mesh>
-      {/* Vertical insulation on CDWS drop */}
-      <mesh position={[-2.5, 6.5, 5]}>
-        <cylinderGeometry args={[0.42, 0.42, 10.5, 12]} />
-        <meshStandardMaterial color="#226644" roughness={0.9} metalness={0.0} transparent opacity={0.85} />
-      </mesh>
-      {/* Elbow fitting at ceiling (horizontal to downward at chiller end) */}
-      <mesh position={[-2.5, 11.5, 5]} rotation={[Math.PI/2, 0, 0]}>
-        <torusGeometry args={[0.30, 0.08, 8, 12, Math.PI/2]} />
+      <mesh position={[CW_X_SUPPLY, 12.38, CW_Z_SUPPLY]} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.3, 0.08, 8, 12, Math.PI / 2]} />
         <meshStandardMaterial color="#b07030" roughness={0.2} metalness={1.0} />
       </mesh>
-      {/* Flange at chiller connection (bottom) */}
-      <mesh position={[-2.5, 1.9, 5]} rotation={[Math.PI/2, 0, 0]}>
+      <mesh position={[11.915, 12.38, CW_Z_SUPPLY]} rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[0.3, 0.3, 23.17, 12]} />
+        <meshStandardMaterial color="#3a8a5a" roughness={0.7} metalness={0.3} />
+      </mesh>
+      <mesh position={[11.915, 12.38, CW_Z_SUPPLY]} rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[0.42, 0.42, 16, 12]} />
+        <meshStandardMaterial color="#226644" roughness={0.9} metalness={0.0} transparent opacity={0.85} />
+      </mesh>
+      <mesh position={[23.5, 14.63, CW_Z_SUPPLY]}>
+        <cylinderGeometry args={[0.3, 0.3, 4.5, 12]} />
+        <meshStandardMaterial color="#3a8a5a" roughness={0.7} metalness={0.3} />
+      </mesh>
+      <mesh position={[23.5, 12.38, CW_Z_SUPPLY]} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.3, 0.08, 8, 12, Math.PI / 2]} />
+        <meshStandardMaterial color="#b07030" roughness={0.2} metalness={1.0} />
+      </mesh>
+      <mesh position={[CW_X_SUPPLY, 1.9, CW_Z_SUPPLY]} rotation={[Math.PI / 2, 0, 0]}>
         <cylinderGeometry args={[0.44, 0.44, 0.1, 12]} />
         <meshStandardMaterial color="#b07030" roughness={0.2} metalness={1.0} />
       </mesh>
-      {/* Flange at tower connection (top) */}
-      <mesh position={[23.2, 12.5, 5]} rotation={[0, 0, Math.PI/2]}>
+      <mesh position={[23.5, 12.38, CW_Z_SUPPLY]} rotation={[0, 0, Math.PI / 2]}>
         <cylinderGeometry args={[0.44, 0.44, 0.12, 12]} />
         <meshStandardMaterial color="#b07030" roughness={0.2} metalness={1.0} />
       </mesh>
-      {/* CDWS Pipe label on ceiling run */}
-      <Text position={[15, 13.2, 5]} fontSize={0.22} color="#226644" anchorX="center" anchorY="bottom" rotation={[0, 0, Math.PI/2]}>
+      <Text position={[8, 13.05, CW_Z_SUPPLY]} fontSize={0.22} color="#226644" anchorX="center" anchorY="bottom" rotation={[0, 0, Math.PI / 2]}>
         CDWS
       </Text>
 
-      {/* ── CDWR: Condenser Water Return ← COOLING TOWER (Brown) ── */}
-      {/* Horizontal run from tower to chiller at ceiling level */}
-      <mesh position={[12, 12.0, 7]} rotation={[0, 0, Math.PI/2]}>
-        <cylinderGeometry args={[0.30, 0.30, 50, 12]} />
+      {/* ── CDWR: Condenser Water Return — offset barrel centerline (x≈−2.05) ── */}
+      <mesh position={[CW_X_RETURN, 7.14, CW_Z_RETURN]}>
+        <cylinderGeometry args={[0.3, 0.3, 10.48, 12]} />
         <meshStandardMaterial color="#8a6040" roughness={0.7} metalness={0.3} />
       </mesh>
-      {/* CDWR insulation on ceiling run */}
-      <mesh position={[12, 12.0, 7]} rotation={[0, 0, Math.PI/2]}>
-        <cylinderGeometry args={[0.42, 0.42, 30, 12]} />
+      <mesh position={[CW_X_RETURN, 7.14, CW_Z_RETURN]}>
+        <cylinderGeometry args={[0.42, 0.42, 8.2, 12]} />
         <meshStandardMaterial color="#6a4422" roughness={0.9} metalness={0.0} transparent opacity={0.85} />
       </mesh>
-      {/* Vertical drop from ceiling DOWN to chiller */}
-      <mesh position={[2.5, 6.5, 7]}>
-        <cylinderGeometry args={[0.30, 0.30, 10.5, 12]} />
-        <meshStandardMaterial color="#8a6040" roughness={0.7} metalness={0.3} />
-      </mesh>
-      {/* Vertical insulation on CDWR drop */}
-      <mesh position={[2.5, 6.5, 7]}>
-        <cylinderGeometry args={[0.42, 0.42, 10.5, 12]} />
-        <meshStandardMaterial color="#6a4422" roughness={0.9} metalness={0.0} transparent opacity={0.85} />
-      </mesh>
-      {/* Elbow at ceiling */}
-      <mesh position={[2.5, 11.2, 7]} rotation={[Math.PI/2, 0, 0]}>
-        <torusGeometry args={[0.30, 0.08, 8, 12, Math.PI/2]} />
+      <mesh position={[CW_X_RETURN, 12.38, CW_Z_RETURN]} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.3, 0.08, 8, 12, Math.PI / 2]} />
         <meshStandardMaterial color="#b07030" roughness={0.2} metalness={1.0} />
       </mesh>
-      {/* Flange at chiller connection */}
-      <mesh position={[2.5, 1.9, 7]} rotation={[Math.PI/2, 0, 0]}>
+      <mesh position={[10.725, 12.32, CW_Z_RETURN]} rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[0.3, 0.3, 25.55, 12]} />
+        <meshStandardMaterial color="#8a6040" roughness={0.7} metalness={0.3} />
+      </mesh>
+      <mesh position={[10.725, 12.32, CW_Z_RETURN]} rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[0.42, 0.42, 17, 12]} />
+        <meshStandardMaterial color="#6a4422" roughness={0.9} metalness={0.0} transparent opacity={0.85} />
+      </mesh>
+      <mesh position={[23.5, 14.55, CW_Z_RETURN]}>
+        <cylinderGeometry args={[0.3, 0.3, 4.34, 12]} />
+        <meshStandardMaterial color="#8a6040" roughness={0.7} metalness={0.3} />
+      </mesh>
+      <mesh position={[23.5, 12.32, CW_Z_RETURN]} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.3, 0.08, 8, 12, Math.PI / 2]} />
+        <meshStandardMaterial color="#b07030" roughness={0.2} metalness={1.0} />
+      </mesh>
+      <mesh position={[CW_X_RETURN, 1.9, CW_Z_RETURN]} rotation={[Math.PI / 2, 0, 0]}>
         <cylinderGeometry args={[0.44, 0.44, 0.1, 12]} />
         <meshStandardMaterial color="#b07030" roughness={0.2} metalness={1.0} />
       </mesh>
-      {/* Flange at tower connection */}
-      <mesh position={[23.2, 12.0, 7]} rotation={[0, 0, Math.PI/2]}>
+      <mesh position={[23.5, 12.32, CW_Z_RETURN]} rotation={[0, 0, Math.PI / 2]}>
         <cylinderGeometry args={[0.44, 0.44, 0.12, 12]} />
         <meshStandardMaterial color="#b07030" roughness={0.2} metalness={1.0} />
       </mesh>
-      {/* CDWR Pipe label on ceiling run */}
-      <Text position={[15, 12.7, 7]} fontSize={0.22} color="#6a4422" anchorX="center" anchorY="bottom" rotation={[0, 0, Math.PI/2]}>
+      <Text position={[8, 12.95, CW_Z_RETURN]} fontSize={0.22} color="#6a4422" anchorX="center" anchorY="bottom" rotation={[0, 0, Math.PI / 2]}>
         CDWR
       </Text>
 
       {/* ── PIPE IDENTIFICATION LABELS ── */}
       {/* CHWS — Blue */}
-      <Text position={[-15, 1.4, -5]} fontSize={0.2} color="#3a6fa8" anchorX="center" anchorY="middle">
+      <Text position={[-15, 1.4, CHW_Z_SUPPLY]} fontSize={0.2} color="#3a6fa8" anchorX="center" anchorY="middle">
         CHWS
       </Text>
       {/* CHWR — Red */}
-      <Text position={[15, 1.4, -7]} fontSize={0.2} color="#c04040" anchorX="center" anchorY="middle">
+      <Text position={[15, 1.4, CHW_Z_RETURN]} fontSize={0.2} color="#c04040" anchorX="center" anchorY="middle">
         CHWR
       </Text>
-      {/* CDWS — Green (on ceiling run) */}
-      {/* CDWR — Brown (on ceiling run) */}      {/* ── PIPE IDENTIFICATION LABELS (on walls) ── */}
+      {/* ── PIPE IDENTIFICATION LABELS (on walls) ── */}
       {/* CHWS label on left wall */}
-      <group position={[-34.2, 1.28, -5]} rotation={[0, Math.PI/2, 0]}>
+      <group position={[-34.2, 1.28, CHW_Z_SUPPLY]} rotation={[0, Math.PI/2, 0]}>
         <mesh>
           <boxGeometry args={[0.6, 0.2, 0.04]} />
           <meshStandardMaterial color="#1144cc" roughness={0.8} />
@@ -871,7 +962,7 @@ function EngineRoom() {
         </mesh>
       </group>
       {/* CHWR label on left wall */}
-      <group position={[-34.2, 1.28, -7]} rotation={[0, Math.PI/2, 0]}>
+      <group position={[-34.2, 1.28, CHW_Z_RETURN]} rotation={[0, Math.PI/2, 0]}>
         <mesh>
           <boxGeometry args={[0.6, 0.2, 0.04]} />
           <meshStandardMaterial color="#aa2020" roughness={0.8} />
@@ -882,7 +973,7 @@ function EngineRoom() {
         </mesh>
       </group>
       {/* CDWS label on right wall */}
-      <group position={[34.2, 1.04, 5]} rotation={[0, Math.PI/2, 0]}>
+      <group position={[34.2, 1.04, CW_Z_SUPPLY]} rotation={[0, Math.PI/2, 0]}>
         <mesh>
           <boxGeometry args={[0.6, 0.2, 0.04]} />
           <meshStandardMaterial color="#226644" roughness={0.8} />
@@ -893,7 +984,7 @@ function EngineRoom() {
         </mesh>
       </group>
       {/* CDWR label on right wall */}
-      <group position={[34.2, 1.04, 7]} rotation={[0, Math.PI/2, 0]}>
+      <group position={[34.2, 1.04, CW_Z_RETURN]} rotation={[0, Math.PI/2, 0]}>
         <mesh>
           <boxGeometry args={[0.6, 0.2, 0.04]} />
           <meshStandardMaterial color="#6a4422" roughness={0.8} />
@@ -905,22 +996,132 @@ function EngineRoom() {
       </group>
 
       {/* ── PIPE SUPPORT CLAMPS on horizontal runs ── */}
-      {[[-10, -5], [-10, -7], [10, 5], [10, 7]].map(([x, z], i) => (
+      {[[-10, CHW_Z_SUPPLY], [-10, CHW_Z_RETURN], [10, CW_Z_SUPPLY], [10, CW_Z_RETURN]].map(([x, z], i) => (
         <mesh key={`psclamp-${i}`} position={[x, 0.55, z]}>
           <boxGeometry args={[0.2, 0.8, 0.12]} />
           <meshStandardMaterial color="#555" roughness={0.5} metalness={0.8} />
         </mesh>
       ))}
 
-      {/* Chiller GLB model */}
-      <ChillerModel position={[0, 0, 0]} />
+      {/* Chiller GLB model + HMI mounted on Cube.001_Baked */}
+      <ChillerModel position={[0, 0, 0]} onHmiZoom={onHmiZoom} hmiLookAtRef={hmiLookAtRef} />
+
+      {/* Lateral tie-ins from chiller barrels (−Z heads) to CHWS / CHWR headers */}
+      <group>
+        <mesh
+          position={[CHW_X_SUPPLY, CHW_Y_FLANGE, (CHW_STUB_Z_IN + CHW_Z_SUPPLY) * 0.5]}
+          rotation={[Math.PI / 2, 0, 0]}
+        >
+          <cylinderGeometry args={[0.35, 0.35, Math.abs(CHW_STUB_Z_IN - CHW_Z_SUPPLY), 12]} />
+          <meshStandardMaterial color="#3a6fa8" roughness={0.7} metalness={0.3} />
+        </mesh>
+        <mesh position={[CHW_X_SUPPLY, 1.12, CHW_Z_SUPPLY]} rotation={[0, 0, Math.PI / 2]}>
+          <torusGeometry args={[0.35, 0.08, 8, 12, Math.PI / 2]} />
+          <meshStandardMaterial color="#b07030" roughness={0.2} metalness={1.0} />
+        </mesh>
+        <mesh
+          position={[CHW_X_RETURN, CHW_Y_FLANGE, (CHW_STUB_Z_IN + CHW_Z_RETURN) * 0.5]}
+          rotation={[Math.PI / 2, 0, 0]}
+        >
+          <cylinderGeometry args={[0.35, 0.35, Math.abs(CHW_STUB_Z_IN - CHW_Z_RETURN), 12]} />
+          <meshStandardMaterial color="#c04040" roughness={0.7} metalness={0.3} />
+        </mesh>
+        <mesh position={[CHW_X_RETURN, 1.12, CHW_Z_RETURN]} rotation={[0, 0, Math.PI / 2]}>
+          <torusGeometry args={[0.35, 0.08, 8, 12, Math.PI / 2]} />
+          <meshStandardMaterial color="#b07030" roughness={0.2} metalness={1.0} />
+        </mesh>
+      </group>
+      {/* Condenser water: +Z barrel runs to risers (nozzle region ~z 3.6) */}
+      <group>
+        <mesh position={[CW_X_SUPPLY, 2.05, (CW_STUB_Z_IN + CW_Z_SUPPLY) * 0.5]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.3, 0.3, CW_Z_SUPPLY - CW_STUB_Z_IN, 12]} />
+          <meshStandardMaterial color="#3a8a5a" roughness={0.7} metalness={0.3} />
+        </mesh>
+        <mesh position={[CW_X_SUPPLY, 2.05, (CW_STUB_Z_IN + CW_Z_SUPPLY) * 0.5]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.4, 0.4, (CW_Z_SUPPLY - CW_STUB_Z_IN) * 0.65, 12]} />
+          <meshStandardMaterial color="#226644" roughness={0.9} metalness={0.0} transparent opacity={0.85} />
+        </mesh>
+        <mesh position={[CW_X_RETURN, 2.05, (CW_STUB_Z_IN + CW_Z_RETURN) * 0.5]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.3, 0.3, CW_Z_RETURN - CW_STUB_Z_IN, 12]} />
+          <meshStandardMaterial color="#8a6040" roughness={0.7} metalness={0.3} />
+        </mesh>
+        <mesh position={[CW_X_RETURN, 2.05, (CW_STUB_Z_IN + CW_Z_RETURN) * 0.5]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.4, 0.4, (CW_Z_RETURN - CW_STUB_Z_IN) * 0.65, 12]} />
+          <meshStandardMaterial color="#6a4422" roughness={0.9} metalness={0.0} transparent opacity={0.85} />
+        </mesh>
+      </group>
     </group>
   );
 }
 
+const HMI_PANEL_BASE = 0.17;
 
-function ChillerModel({ position }: { position: [number, number, number] }) {
+function findCube001Baked(root: THREE.Object3D): THREE.Mesh | null {
+  let found: THREE.Mesh | null = null;
+  root.traverse((o) => {
+    if (found || !(o instanceof THREE.Mesh)) return;
+    const n = o.name;
+    if (n === 'Cube.001_Baked' || n === 'Cube001_Baked') {
+      found = o;
+    }
+  });
+  return found;
+}
+
+function ChillerModel({
+  position,
+  onHmiZoom,
+  hmiLookAtRef,
+}: {
+  position: [number, number, number];
+  onHmiZoom: () => void;
+  hmiLookAtRef: MutableRefObject<THREE.Vector3>;
+}) {
   const { scene } = useGLTF('/models/Chiller_R2.glb');
+  const hmiMountRef = useRef<THREE.Group>(null);
+
+  useLayoutEffect(() => {
+    const g = hmiMountRef.current;
+    if (!g) return;
+
+    const mesh = findCube001Baked(scene);
+    if (!mesh) {
+      g.position.set(3.5, 2.5, 0);
+      g.rotation.set(0, Math.PI / 2, 0);
+      g.scale.setScalar(HMI_PANEL_BASE);
+      hmiLookAtRef.current.set(3.5, 2.5, 0);
+      return;
+    }
+
+    mesh.add(g);
+    const geom = mesh.geometry;
+    if (!geom.boundingBox) geom.computeBoundingBox();
+    const bb = geom.boundingBox!;
+    const sx = bb.max.x - bb.min.x;
+    const sy = bb.max.y - bb.min.y;
+    const sz = bb.max.z - bb.min.z;
+    const cx = (bb.min.x + bb.max.x) * 0.5;
+    const cy = (bb.min.y + bb.max.y) * 0.5;
+    const bump = 0.015 * Math.max(sx, sy, sz);
+    const cz = bb.max.z + bump;
+
+    const panelW = 1.22;
+    const panelH = 0.92;
+    const fit = (0.9 * Math.min(sx, sy)) / Math.max(panelW, panelH);
+
+    g.position.set(cx, cy, cz);
+    g.rotation.set(0, 0, 0);
+    g.scale.setScalar(Math.max(0.02, fit) * HMI_PANEL_BASE);
+
+    mesh.updateWorldMatrix(true, true);
+    const face = new THREE.Vector3(cx, cy, cz);
+    mesh.localToWorld(face);
+    hmiLookAtRef.current.copy(face);
+
+    return () => {
+      mesh.remove(g);
+    };
+  }, [scene, hmiLookAtRef]);
 
   return (
     <group position={position}>
@@ -930,95 +1131,108 @@ function ChillerModel({ position }: { position: [number, number, number] }) {
         castShadow
         receiveShadow
       />
+      <group ref={hmiMountRef}>
+        <HMIPanel3D onZoom={onHmiZoom} />
+      </group>
     </group>
   );
 }
 
 function HMIPanel3D({ onZoom }: { onZoom: () => void }) {
-  const meshRef = useRef<THREE.Mesh>(null);
-  const matRef = useRef<THREE.MeshStandardMaterial>(null);
-  const textureRef = useRef<THREE.CanvasTexture | null>(null);
+  const hmiMeshSrc = `${import.meta.env.BASE_URL}hmi.html?mesh=1`;
 
-  useEffect(() => {
-    // Load hmi2.html via fetch and render to canvas
-    fetch('/hmi2.html')
-      .then(r => r.text())
-      .then(html => {
-        // Create a hidden iframe to render the HTML
-        const iframe = document.createElement('iframe');
-        iframe.style.cssText = 'position:absolute;width:800px;height:600px;left:-9999px;top:0;border:none;';
-        iframe.srcdoc = html;
-        document.body.appendChild(iframe);
-
-        iframe.onload = () => {
-          setTimeout(() => {
-            try {
-              const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-              if (!iframeDoc) return;
-              const iframeBody = iframeDoc.body;
-
-              html2canvas(iframeBody, {
-                width: 800,
-                height: 600,
-                scale: 1,
-                useCORS: true,
-                allowTaint: true,
-                logging: false,
-              }).then((captured: HTMLCanvasElement) => {
-                const tex = new THREE.CanvasTexture(captured);
-                if (matRef.current) {
-                  matRef.current.map = tex;
-                  matRef.current.needsUpdate = true;
-                  textureRef.current = tex;
-                }
-              }).catch(() => {});
-            } finally {
-              document.body.removeChild(iframe);
-            }
-          }, 500);
-        };
-      })
-      .catch(() => {});
-
-    return () => {
-      if (textureRef.current) textureRef.current.dispose();
-    };
-  }, []);
-
+  /* Parent group in ChillerModel is on Cube.001_Baked +Z face; panel in XY faces +Z outward. */
   return (
-    <group position={[3.5, 2.5, 0]}>
-      {/* Panel housing / bezel */}
+    <group>
       <mesh castShadow>
         <boxGeometry args={[1.22, 0.92, 0.06]} />
         <meshStandardMaterial color="#111111" roughness={0.5} metalness={0.5} />
       </mesh>
-      {/* Screen — clickable */}
-      <mesh
-        ref={meshRef}
-        position={[0, 0, 0.04]}
-        onClick={onZoom}
-        onPointerOver={() => { document.body.style.cursor = 'pointer'; }}
-        onPointerOut={() => { document.body.style.cursor = 'auto'; }}
-      >
+      <mesh position={[0, 0, -0.04]}>
         <planeGeometry args={[1.1, 0.8]} />
-        <meshStandardMaterial
-          ref={matRef}
-          color="#1a2a1a"
-          roughness={0.3}
-          metalness={0.1}
-          emissive="#001000"
-          emissiveIntensity={0.1}
-        />
+        <meshStandardMaterial color="#0d0d0d" roughness={0.35} metalness={0.15} />
       </mesh>
+      <Html
+        transform
+        position={[0, 0, -0.045]}
+        distanceFactor={4.35}
+        zIndexRange={[28, 1]}
+        style={{
+          width: '680px',
+          height: '495px',
+        }}
+      >
+        <div
+          style={{
+            position: 'relative',
+            width: '100%',
+            height: '100%',
+            borderRadius: 2,
+            overflow: 'hidden',
+            boxShadow: 'inset 0 0 0 2px #1a1a1a',
+          }}
+        >
+          <iframe
+            title="York HMI (3D)"
+            src={hmiMeshSrc}
+            scrolling="no"
+            style={{
+              width: '100%',
+              height: '100%',
+              border: 'none',
+              display: 'block',
+              background: '#3a2e18',
+              overflow: 'hidden',
+            }}
+          />
+          <button
+            type="button"
+            aria-label="Focus camera on HMI"
+            onClick={(e) => {
+              e.stopPropagation();
+              onZoom();
+            }}
+            onPointerEnter={() => {
+              document.body.style.cursor = 'pointer';
+            }}
+            onPointerLeave={() => {
+              document.body.style.cursor = 'auto';
+            }}
+            style={{
+              position: 'absolute',
+              top: 6,
+              right: 6,
+              zIndex: 2,
+              padding: '4px 8px',
+              fontSize: 11,
+              fontFamily: 'system-ui, sans-serif',
+              color: '#ddd',
+              background: 'rgba(0,0,0,0.55)',
+              border: '1px solid #555',
+              borderRadius: 4,
+              cursor: 'pointer',
+            }}
+          >
+            Focus
+          </button>
+        </div>
+      </Html>
     </group>
   );
 }
 
-function CameraController({ zoomed }: { zoomed: boolean }) {
+function CameraController({
+  zoomed,
+  hmiLookAtRef,
+}: {
+  zoomed: boolean;
+  hmiLookAtRef: MutableRefObject<THREE.Vector3>;
+}) {
   const { camera } = useThree();
   const activeRef = useRef(false);
   const progressRef = useRef(0);
   const lastZoomRef = useRef(zoomed);
+  const closeCamScratch = useRef(new THREE.Vector3());
 
   useFrame((_, delta) => {
     if (zoomed !== lastZoomRef.current) {
@@ -1031,11 +1245,25 @@ function CameraController({ zoomed }: { zoomed: boolean }) {
       progressRef.current = Math.min(progressRef.current + delta * 1.2, 1);
       const t = progressRef.current;
       const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-      const fromPos = zoomed ? new THREE.Vector3(15, 10, 20) : new THREE.Vector3(5.5, 2.8, 3);
-      const toPos = zoomed ? new THREE.Vector3(5.5, 2.8, 3) : new THREE.Vector3(15, 10, 20);
+      const wide = new THREE.Vector3(
+        DEFAULT_SIM_CAMERA_POSITION[0],
+        DEFAULT_SIM_CAMERA_POSITION[1],
+        DEFAULT_SIM_CAMERA_POSITION[2],
+      );
+      const close = closeCamScratch.current
+        .copy(hmiLookAtRef.current)
+        .add(new THREE.Vector3(1.35, 0.35, 1.35));
+      const fromPos = zoomed ? wide : close;
+      const toPos = zoomed ? close : wide;
       camera.position.lerpVectors(fromPos, toPos, ease);
       if (zoomed) {
-        camera.lookAt(3.5, 2.5, 0);
+        camera.lookAt(hmiLookAtRef.current);
+      } else {
+        camera.lookAt(
+          CHILLER_ORBIT_TARGET[0],
+          CHILLER_ORBIT_TARGET[1],
+          CHILLER_ORBIT_TARGET[2],
+        );
       }
     }
   });
@@ -1046,6 +1274,30 @@ function CameraController({ zoomed }: { zoomed: boolean }) {
 export default function App() {
   const [showCxAlloy, setShowCxAlloy] = useState(false);
   const [zoomedHMI, setZoomedHMI] = useState(false);
+  const hmiLookAtRef = useRef(new THREE.Vector3(0, 2.5, 0));
+
+  // Keep browser page-zoom (Ctrl/Cmd + wheel, trackpad pinch) from scaling the chrome
+  // (top bar, iPad widget). OrbitControls still receives the wheel event for dolly.
+  useEffect(() => {
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+      }
+    };
+    const onGesture = (e: Event) => {
+      e.preventDefault();
+    };
+    window.addEventListener('wheel', onWheel, { passive: false, capture: true });
+    window.addEventListener('gesturestart', onGesture, { capture: true });
+    window.addEventListener('gesturechange', onGesture, { capture: true });
+    window.addEventListener('gestureend', onGesture, { capture: true });
+    return () => {
+      window.removeEventListener('wheel', onWheel, { capture: true } as AddEventListenerOptions);
+      window.removeEventListener('gesturestart', onGesture, { capture: true } as AddEventListenerOptions);
+      window.removeEventListener('gesturechange', onGesture, { capture: true } as AddEventListenerOptions);
+      window.removeEventListener('gestureend', onGesture, { capture: true } as AddEventListenerOptions);
+    };
+  }, []);
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#0a0a0a', position: 'relative', overflow: 'hidden' }}>
@@ -1054,37 +1306,32 @@ export default function App() {
       {/* iPad widget */}
       <CxAlloyWidget onOpen={() => setShowCxAlloy(true)} />
 
-      {/* CxAlloy full panel */}
-      {showCxAlloy && (
-        <div style={{ position: 'absolute', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.85)' }}>
-          <CxAlloyPanel onClose={() => setShowCxAlloy(false)} />
-        </div>
-      )}
-
-      {/* HMI Panel — hidden when zoomed into 3D HMI */}
-      {!zoomedHMI && <HMIPanel />}
+      {/* CxAlloy — full interactive HTML from the iPad widget */}
+      {showCxAlloy && <CxAlloyHtmlMaximized onClose={() => setShowCxAlloy(false)} />}
 
       {/* 3D Canvas */}
       <div style={{ position: 'absolute', inset: 0 }}>
         <Canvas
           shadows
           gl={{ antialias: true, alpha: false, powerPreference: 'high-performance' }}
-          camera={{ position: [15, 10, 20], fov: 45, near: 0.1, far: 200 }}
+          camera={{
+            position: DEFAULT_SIM_CAMERA_POSITION,
+            fov: 45,
+            near: 0.1,
+            far: 500,
+          }}
         >
           <Suspense fallback={null}>
             <Scene />
-            <EngineRoom />
+            <EngineRoom onHmiZoom={() => setZoomedHMI(true)} hmiLookAtRef={hmiLookAtRef} />
+            <InspectRaycaster />
 
-            {/* 3D HMI panel on chiller — click to zoom in */}
-            <HMIPanel3D onZoom={() => setZoomedHMI(true)} />
+            {/* Camera animation on HMI zoom (HMI lives under ChillerModel on Cube.001_Baked) */}
+            <CameraController zoomed={zoomedHMI} hmiLookAtRef={hmiLookAtRef} />
 
-            {/* Camera animation on HMI zoom */}
-            <CameraController zoomed={zoomedHMI} />
-
-            {/* Orbit controls — disable when zoomed */}
             <OrbitControls
               makeDefault
-              target={[0, 3, 0]}
+              target={CHILLER_ORBIT_TARGET}
               minDistance={8}
               maxDistance={150}
               minPolarAngle={0.2}
@@ -1092,7 +1339,6 @@ export default function App() {
               enableDamping
               dampingFactor={0.05}
               enabled={!zoomedHMI}
-              onChange={() => {}}
             />
           </Suspense>
         </Canvas>
@@ -1101,7 +1347,7 @@ export default function App() {
       {/* Zoom overlay — click anywhere to exit zoom */}
       {zoomedHMI && (
         <div
-          style={{ position: 'absolute', inset: 0, zIndex: 10, cursor: 'pointer' }}
+          style={{ position: 'absolute', inset: 0, zIndex: 60, cursor: 'pointer' }}
           onClick={() => setZoomedHMI(false)}
         />
       )}
