@@ -8,6 +8,7 @@ import {
   inspectObjectPath,
   pickInspectMeshHit,
 } from './inspectHitDetail';
+import { lookupComponentSpec } from './inspectRegistry';
 
 export function InspectRaycaster() {
   const inspectMode = useInspectStore((s) => s.inspectMode);
@@ -92,6 +93,7 @@ export function InspectRaycaster() {
       : null;
     const path = meshHit ? inspectObjectPath(meshHit.object) : null;
     const detail = meshHit ? buildInspectHitDetail(meshHit) : null;
+    const spec = lookupComponentSpec(path);
 
     if (
       last.current.name === name &&
@@ -101,7 +103,7 @@ export function InspectRaycaster() {
       return;
     }
     last.current = { name, path, detail };
-    setHovered(name, path, detail);
+    setHovered(name, path, detail, spec);
   });
 
   return null;

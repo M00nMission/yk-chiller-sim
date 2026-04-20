@@ -27,6 +27,7 @@ import {
 } from './components/canvas/PipingAccessories';
 import { Vfd, VfdWiring } from './components/canvas/Vfd';
 import { PidPlantSystems } from './components/canvas/PidPlantSystems';
+import { PipeFlowMarkers } from './components/canvas/PipeFlowMarkers';
 import { EndSuctionHvacPump } from './components/canvas/IndustrialCentrifugalPump';
 import { useSimulationStore } from './store/useSimulationStore';
 import { useGarageDoorStore } from './store/useGarageDoorStore';
@@ -52,7 +53,7 @@ function PipeLabel({
   width = 2.4,
 }: {
   position: [number, number, number];
-  axisAlong: 'x' | 'z';
+  axisAlong: 'x' | 'y' | 'z';
   pipeRadius: number;
   bgColor: string;
   text: string;
@@ -63,15 +64,22 @@ function PipeLabel({
   const sleeveRadius = pipeRadius + 0.012;
   const faceOffset = sleeveRadius + 0.006;
 
-  /* Default cylinder axis is +Y. Rotate to align with chosen world axis. */
+  /* Default cylinder axis is +Y. Rotate to align with chosen world axis.
+     'y' → no rotation needed (cylinder already vertical). */
   const sleeveRot: [number, number, number] =
-    axisAlong === 'x' ? [0, 0, Math.PI / 2] : [Math.PI / 2, 0, 0];
+    axisAlong === 'x' ? [0, 0, Math.PI / 2]
+    : axisAlong === 'z' ? [Math.PI / 2, 0, 0]
+    : [0, 0, 0];
 
   /* Visible label "face" height — the colored band on the front of the pipe */
   const faceHeight = pipeRadius * 1.55;
   const fontSize = faceHeight * 0.42;
   const arrowSize = faceHeight * 0.55;
   const textWidth = width - arrowSize * 2.4;
+
+  /* For 'y' axis (vertical pipes) the sleeve bands shift in Y and the text
+     faces the camera on the +Z face, arrow points up/down along Y. */
+  const isY = axisAlong === 'y';
 
   return (
     <group position={position}>
@@ -90,14 +98,16 @@ function PipeLabel({
       </mesh>
 
       {/* Thin black borders top/bottom of the band for the printed-edge look */}
-      <mesh rotation={sleeveRot} position={[axisAlong === 'x' ? 0 : 0, 0, 0]}>
+      <mesh rotation={sleeveRot} position={[0, isY ? 0 : 0, 0]}>
         <cylinderGeometry args={[sleeveRadius + 0.002, sleeveRadius + 0.002, 0.02, 24, 1, true]} />
         <meshStandardMaterial color="#0a0a0a" side={THREE.DoubleSide} />
       </mesh>
       <mesh
         rotation={sleeveRot}
         position={
-          axisAlong === 'x' ? [width / 2 - 0.01, 0, 0] : [0, 0, width / 2 - 0.01]
+          axisAlong === 'x' ? [width / 2 - 0.01, 0, 0]
+          : axisAlong === 'z' ? [0, 0, width / 2 - 0.01]
+          : [0, width / 2 - 0.01, 0]
         }
       >
         <cylinderGeometry args={[sleeveRadius + 0.002, sleeveRadius + 0.002, 0.02, 24, 1, true]} />
@@ -106,7 +116,9 @@ function PipeLabel({
       <mesh
         rotation={sleeveRot}
         position={
-          axisAlong === 'x' ? [-width / 2 + 0.01, 0, 0] : [0, 0, -width / 2 + 0.01]
+          axisAlong === 'x' ? [-width / 2 + 0.01, 0, 0]
+          : axisAlong === 'z' ? [0, 0, -width / 2 + 0.01]
+          : [0, -width / 2 + 0.01, 0]
         }
       >
         <cylinderGeometry args={[sleeveRadius + 0.002, sleeveRadius + 0.002, 0.02, 24, 1, true]} />
@@ -118,9 +130,15 @@ function PipeLabel({
         position={
           axisAlong === 'x'
             ? [-flowSign * arrowSize * 0.4, 0, faceOffset]
-            : [faceOffset, 0, -flowSign * arrowSize * 0.4]
+            : axisAlong === 'z'
+            ? [faceOffset, 0, -flowSign * arrowSize * 0.4]
+            : [0, -flowSign * arrowSize * 0.4, faceOffset]
         }
-        rotation={axisAlong === 'x' ? [0, 0, 0] : [0, Math.PI / 2, 0]}
+        rotation={
+          axisAlong === 'x' ? [0, 0, 0]
+          : axisAlong === 'z' ? [0, Math.PI / 2, 0]
+          : [0, 0, 0]
+        }
         fontSize={fontSize}
         color="#ffffff"
         anchorX="center"
@@ -145,10 +163,20 @@ function PipeLabel({
           <coneGeometry args={[arrowSize * 0.55, arrowSize, 3]} />
           <meshStandardMaterial color="#ffffff" roughness={0.4} metalness={0.1} />
         </mesh>
-      ) : (
+      ) : axisAlong === 'z' ? (
         <mesh
           position={[faceOffset, 0, flowSign * (width / 2 - arrowSize * 0.7)]}
           rotation={[flowSign > 0 ? Math.PI / 2 : -Math.PI / 2, 0, 0]}
+          renderOrder={2}
+        >
+          <coneGeometry args={[arrowSize * 0.55, arrowSize, 3]} />
+          <meshStandardMaterial color="#ffffff" roughness={0.4} metalness={0.1} />
+        </mesh>
+      ) : (
+        /* 'y' — vertical pipe: arrow points up (+Y) or down (-Y) */
+        <mesh
+          position={[0, flowSign * (width / 2 - arrowSize * 0.7), faceOffset]}
+          rotation={[flowSign > 0 ? 0 : Math.PI, 0, 0]}
           renderOrder={2}
         >
           <coneGeometry args={[arrowSize * 0.55, arrowSize, 3]} />
@@ -3130,7 +3158,7 @@ function EngineRoom({
             {/* Vertical riser ID band (engine-room side, eye level) */}
             <PipeLabel
               position={[xRiser, 5.5, z]}
-              axisAlong="z"
+              axisAlong="y"
               pipeRadius={MAIN_PIPE_RADIUS}
               bgColor={lblC}
               text={shortName}
@@ -3865,6 +3893,68 @@ function EngineRoom({
 
       {/* pid.json — makeup, chemical, pumps, expansion, electrical, FT/PDI/PSV */}
       <PidPlantSystems />
+
+      {/* ─────────────────────────────────────────────────────────────────
+          ANIMATED FLOW INDICATORS (pid `animation` — water flow animation
+          in pipes, color-coded). Chevrons slide along the pipe surface
+          while the corresponding loop is energized; hidden when idle.
+          Placed on the long, visible header / rooftop runs.
+          CHWS/CHWR: HEADER_Y = 1.10, span = chiller riser (X≈-2) to past
+                     AHU tee (X≈-12.25). Use mid-point + length.
+          CDWS/CDWR rooftop horizontals: y = 12.38, span riser to tower-X.
+         ───────────────────────────────────────────────────────────────── */}
+      {(() => {
+        const HEADER_Y = 1.10;
+        /* Engine-room CHW header span (chiller riser → past AHU tee).
+           Chiller risers land at X = CHW_X_SUPPLY (-1.984); AHU tee is at
+           AHU_TEE_X (-13.50). Animate over the visible portion. */
+        const chHdrLen = Math.abs(CHW_X_SUPPLY - AHU_TEE_X);
+        const chHdrCtrX = (CHW_X_SUPPLY + AHU_TEE_X) / 2;
+        /* Rooftop CWS/CWR horizontal runs: from above-chiller riser
+           (X = CW_X_SUPPLY ≈ 0) east to tower-side riser (X = 23.5). */
+        const cdRoofLen = Math.abs(23.5 - CW_X_SUPPLY) - 1.0;
+        const cdRoofCtrX = (23.5 + CW_X_SUPPLY) / 2;
+        return (
+          <>
+            <PipeFlowMarkers
+              name="flow:CHWS"
+              center={[chHdrCtrX, HEADER_Y, CHW_Z_SUPPLY]}
+              length={chHdrLen}
+              pipeRadius={MAIN_PIPE_RADIUS}
+              color="#1c5aa8"
+              flowing={evaporatorWaterFlowing}
+              direction={-1}
+            />
+            <PipeFlowMarkers
+              name="flow:CHWR"
+              center={[chHdrCtrX, HEADER_Y, CHW_Z_RETURN]}
+              length={chHdrLen}
+              pipeRadius={MAIN_PIPE_RADIUS}
+              color="#7eb8d8"
+              flowing={evaporatorWaterFlowing}
+              direction={1}
+            />
+            <PipeFlowMarkers
+              name="flow:CDWS-roof"
+              center={[cdRoofCtrX, 12.38, CW_Z_SUPPLY]}
+              length={cdRoofLen}
+              pipeRadius={MAIN_PIPE_RADIUS}
+              color="#1f7a3a"
+              flowing={condenserWaterFlowing}
+              direction={1}
+            />
+            <PipeFlowMarkers
+              name="flow:CDWR-roof"
+              center={[cdRoofCtrX, 12.38, CW_Z_RETURN]}
+              length={cdRoofLen}
+              pipeRadius={MAIN_PIPE_RADIUS}
+              color="#7ec07a"
+              flowing={condenserWaterFlowing}
+              direction={-1}
+            />
+          </>
+        );
+      })()}
     </group>
   );
 }

@@ -15,6 +15,10 @@ dist-ssr
 # Large model files
 abandoned_warehouse_-_interior_scene.glb
 
+# Blender source files and autosave backups (too large for GitHub, exceed 100 MB)
+*.blend
+*.blend1
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

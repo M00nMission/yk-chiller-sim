@@ -2,6 +2,15 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useSimulationStore } from '../../store/useSimulationStore';
 import { useInspectStore } from '../../store/useInspectStore';
 import { useGarageDoorStore } from '../../store/useGarageDoorStore';
+import { usePlantLayerStore, type PlantLayerKey } from '../../store/usePlantLayerStore';
+
+const LAYER_TOGGLES: Array<{ key: PlantLayerKey; label: string; tip: string }> = [
+  { key: 'hydronics',      label: 'Hydronics',      tip: 'Pumps, headers, expansion tank, chiller air vents' },
+  { key: 'electrical',     label: 'Electrical',     tip: 'Transformer, breaker, disconnects, VFD bypass, conduits' },
+  { key: 'instrumentation', label: 'Instruments',   tip: 'FT / TT / PT / PDI bubbles and field transmitters' },
+  { key: 'drains',         label: 'Drains',         tip: 'Low-point drain valves at HX, pumps, AHU coil' },
+  { key: 'makeupChemical', label: 'Makeup / Chem', tip: 'RPZ, PRV, LC, chemical pot feeder, injection quill' },
+];
 
 export function ControlPanelUI() {
   const { state } = useSimulationStore();
@@ -10,9 +19,12 @@ export function ControlPanelUI() {
   const hoveredName = useInspectStore((s) => s.hoveredName);
   const hoveredPath = useInspectStore((s) => s.hoveredPath);
   const hoveredDetail = useInspectStore((s) => s.hoveredDetail);
+  const hoveredSpec = useInspectStore((s) => s.hoveredSpec);
   const copyFeedback = useInspectStore((s) => s.copyFeedback);
   const garageDoorsOpen = useGarageDoorStore((s) => s.open);
   const toggleGarageDoors = useGarageDoorStore((s) => s.toggle);
+  const layers = usePlantLayerStore((s) => s.layers);
+  const toggleLayer = usePlantLayerStore((s) => s.toggleLayer);
 
   return (
     <>
@@ -58,21 +70,60 @@ export function ControlPanelUI() {
         </div>
       </div>
 
-      {/* Color / service legend (pid color_coding_standards_2026) */}
-      <div
-        className="absolute top-14 right-4 z-20 max-w-[min(20rem,calc(100vw-2rem))] rounded-lg border border-[#2d3239] bg-[#121518]/92 px-3 py-2.5 text-[11px] text-[#c8d0d8] shadow-lg backdrop-blur-sm pointer-events-none"
-        aria-hidden
-      >
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-[#6b7280] mb-1.5">Service colors</div>
-        <ul className="space-y-1 leading-snug">
-          <li><span className="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1.5" style={{ background: '#0d3f7a' }} /> CHWS — chilled supply</li>
-          <li><span className="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1.5" style={{ background: '#4a8ab8' }} /> CHWR — chilled return</li>
-          <li><span className="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1.5" style={{ background: '#1d7a3a' }} /> CWS — condenser supply</li>
-          <li><span className="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1.5" style={{ background: '#7ec07a' }} /> CWR — condenser return</li>
-          <li><span className="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1.5" style={{ background: '#f2f4f7' }} /> Makeup (domestic)</li>
-          <li><span className="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1.5" style={{ background: '#d96818' }} /> Chemical feed</li>
-          <li><span className="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1.5" style={{ background: '#8a8d92' }} /> Drain / overflow</li>
-        </ul>
+      {/* Right-rail: color legend + layer toggles
+          (pid color_coding_standards_2026 + visual_and_interaction_requirements.layers) */}
+      <div className="absolute top-14 right-4 z-20 max-w-[min(20rem,calc(100vw-2rem))] flex flex-col gap-2">
+        {/* Color / service legend */}
+        <div
+          className="rounded-lg border border-[#2d3239] bg-[#121518]/92 px-3 py-2.5 text-[11px] text-[#c8d0d8] shadow-lg backdrop-blur-sm pointer-events-none"
+          aria-hidden
+        >
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-[#6b7280] mb-1.5">Service colors</div>
+          <ul className="space-y-1 leading-snug">
+            <li><span className="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1.5" style={{ background: '#0d3f7a' }} /> CHWS — chilled supply</li>
+            <li><span className="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1.5" style={{ background: '#4a8ab8' }} /> CHWR — chilled return</li>
+            <li><span className="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1.5" style={{ background: '#1d7a3a' }} /> CWS — condenser supply</li>
+            <li><span className="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1.5" style={{ background: '#7ec07a' }} /> CWR — condenser return</li>
+            <li><span className="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1.5" style={{ background: '#f2f4f7' }} /> Makeup (domestic)</li>
+            <li><span className="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1.5" style={{ background: '#d96818' }} /> Chemical feed</li>
+            <li><span className="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1.5" style={{ background: '#8a8d92' }} /> Drain / overflow</li>
+          </ul>
+        </div>
+
+        {/* Layer toggles */}
+        <div className="rounded-lg border border-[#2d3239] bg-[#121518]/92 px-3 py-2.5 text-[11px] text-[#c8d0d8] shadow-lg backdrop-blur-sm">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-[#6b7280] mb-1.5">Layers</div>
+          <div className="grid grid-cols-1 gap-1">
+            {LAYER_TOGGLES.map(({ key, label, tip }) => {
+              const on = layers[key];
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => toggleLayer(key)}
+                  title={tip}
+                  aria-pressed={on}
+                  className={
+                    on
+                      ? 'flex items-center justify-between gap-2 rounded border border-cyan-700/60 bg-cyan-950/70 px-2 py-1 text-cyan-100 hover:bg-cyan-900/80'
+                      : 'flex items-center justify-between gap-2 rounded border border-[#3d4249] bg-[#1a1d22] px-2 py-1 text-[#7a818a] hover:bg-[#23272c] hover:text-[#c8d0d8]'
+                  }
+                >
+                  <span className="flex items-center gap-1.5">
+                    <span
+                      aria-hidden
+                      className={`inline-block w-1.5 h-1.5 rounded-full ${on ? 'bg-cyan-300 shadow-[0_0_5px_rgba(165,243,252,0.8)]' : 'bg-[#4a4f55]'}`}
+                    />
+                    {label}
+                  </span>
+                  <span className="font-mono text-[10px] tracking-wider opacity-70">
+                    {on ? 'ON' : 'OFF'}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       {/* Inspect mode: mesh id readout */}
@@ -89,6 +140,40 @@ export function ControlPanelUI() {
           {hoveredPath && hoveredPath !== hoveredName && (
             <div className="mt-2 text-[11px] leading-snug text-[#8aa8a0] break-all border-t border-[#2a2f34] pt-2">
               {hoveredPath}
+            </div>
+          )}
+          {hoveredSpec && (
+            <div className="mt-3 border-t border-cyan-900/40 pt-2 rounded-sm">
+              <div className="flex items-baseline gap-2">
+                <span className="text-[9px] font-semibold uppercase tracking-wider text-cyan-400/90">
+                  Component
+                </span>
+                <span className="font-mono text-[12px] font-semibold text-cyan-100">
+                  {hoveredSpec.tag}
+                </span>
+              </div>
+              {hoveredSpec.service && (
+                <div className="mt-1 text-[11px] text-[#dadcde]">
+                  {hoveredSpec.service}
+                </div>
+              )}
+              {hoveredSpec.spec && (
+                <div className="mt-1.5 text-[10.5px] leading-snug text-[#b8c5c0]">
+                  <span className="text-[9px] font-semibold uppercase tracking-wider text-[#6b7280] mr-1">Spec</span>
+                  {hoveredSpec.spec}
+                </div>
+              )}
+              {hoveredSpec.installNote && (
+                <div className="mt-1 text-[10.5px] leading-snug text-[#b8c5c0]">
+                  <span className="text-[9px] font-semibold uppercase tracking-wider text-[#6b7280] mr-1">Install</span>
+                  {hoveredSpec.installNote}
+                </div>
+              )}
+              {hoveredSpec.pidRef && (
+                <div className="mt-1.5 text-[10px] italic leading-snug text-[#7a8a88]">
+                  pid.json — {hoveredSpec.pidRef}
+                </div>
+              )}
             </div>
           )}
           {hoveredDetail && (

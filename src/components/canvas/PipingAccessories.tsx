@@ -402,10 +402,15 @@ export function GateValve({
   const stemLen = THREE.MathUtils.clamp(D * 0.36, 0.28, 0.78);
   const yStem = yBonBody + bonnetH * 0.42 + stemLen * 0.38;
   const yWheel = yStem + stemLen * 0.48;
-  const handwheelMajor = THREE.MathUtils.clamp(D * 0.168, R_env * 0.14, R_env * 0.32);
-  const tubeR = THREE.MathUtils.clamp(D * 0.022, 0.012, 0.034);
-  const spokeHalf = Math.min(handwheelMajor * 0.88, R_env * 0.29);
-  const hubR = THREE.MathUtils.clamp(boltDia * 1.35, 0.014, R_env * 0.088);
+  /* Handwheel sizing — real OS&Y wheel diameter is ~1.4–2.0 × nominal pipe
+     diameter, with an ergonomic floor (operator needs ≥150 mm grip). For an
+     8" valve the wheel is ~10–12", for an 18" valve it's ~24–28". Scale on
+     bore radius r (not insulated R_env) so jacket thickness doesn't bias it,
+     and clamp the floor so 1" trim valves still get a hand-grippable wheel. */
+  const handwheelMajor = THREE.MathUtils.clamp(r * 1.55, 0.075, r * 2.10);
+  const tubeR = THREE.MathUtils.clamp(handwheelMajor * 0.075, 0.0085, 0.030);
+  const spokeHalf = handwheelMajor * 0.92;
+  const hubR = THREE.MathUtils.clamp(handwheelMajor * 0.16, 0.018, 0.075);
 
   const stemTravel = THREE.MathUtils.clamp(D * 0.052, 0.05, 0.14);
   /* Turns over full stroke — stem rise stays locked to this lead (OS&Y). */
@@ -674,28 +679,43 @@ export function GlobeValve({
         <cylinderGeometry args={[r * 0.5, r * 0.5, 0.06, 12]} />
         <meshStandardMaterial color={STEEL} roughness={0.45} metalness={0.75} />
       </mesh>
-      <group ref={stemRef}>
-        <mesh position={[0, r * 1.42, 0]}>
-          <cylinderGeometry args={[0.026, 0.026, 0.55, 8]} />
-          <meshStandardMaterial color="#ccc" roughness={0.25} metalness={0.95} />
-        </mesh>
-        <group ref={handwheelRef} position={[0, r * 1.92, 0]}>
-          <mesh rotation={[Math.PI / 2, 0, 0]}>
-            <torusGeometry args={[r * 0.55, 0.022, 8, 24]} />
-            <meshStandardMaterial color={handwheelColor} roughness={0.45} metalness={0.55} />
-          </mesh>
-          {[0, Math.PI / 2].map((a, i) => (
-            <mesh key={i} rotation={[0, a, 0]}>
-              <boxGeometry args={[r * 1.1, 0.016, 0.016]} />
-              <meshStandardMaterial color={handwheelColor} roughness={0.5} metalness={0.5} />
+      {/* Handwheel sizing — globe valves use the same ergonomic rule of thumb
+         as gate valves (wheel dia ≈ 1.4–1.8 × pipe nominal dia) with a
+         150 mm ergonomic floor so small balancing valves stay turn-able. */}
+      {(() => {
+        const hwR = THREE.MathUtils.clamp(r * 1.45, 0.075, r * 1.95);
+        const tubeR = THREE.MathUtils.clamp(hwR * 0.075, 0.0085, 0.028);
+        const spokeHalf = hwR * 0.92;
+        const hubR = THREE.MathUtils.clamp(hwR * 0.16, 0.020, 0.070);
+        const stemR = THREE.MathUtils.clamp(r * 0.10, 0.014, 0.034);
+        const stemLen = Math.max(hwR * 1.2, r * 1.2);
+        const yStemCenter = r * 1.2 + stemLen * 0.45;
+        const yWheel = yStemCenter + stemLen * 0.5 + 0.01;
+        return (
+          <group ref={stemRef}>
+            <mesh position={[0, yStemCenter, 0]}>
+              <cylinderGeometry args={[stemR, stemR, stemLen, 10]} />
+              <meshStandardMaterial color="#d6d8dc" roughness={0.22} metalness={0.92} />
             </mesh>
-          ))}
-          <mesh>
-            <cylinderGeometry args={[0.035, 0.035, 0.05, 6]} />
-            <meshStandardMaterial color="#222" roughness={0.5} metalness={0.6} />
-          </mesh>
-        </group>
-      </group>
+            <group ref={handwheelRef} position={[0, yWheel, 0]}>
+              <mesh rotation={[Math.PI / 2, 0, 0]}>
+                <torusGeometry args={[hwR, tubeR, 8, 28]} />
+                <meshStandardMaterial color={handwheelColor} roughness={0.42} metalness={0.58} />
+              </mesh>
+              {[0, Math.PI / 2].map((a, i) => (
+                <mesh key={i} rotation={[0, a, 0]}>
+                  <boxGeometry args={[spokeHalf * 2, tubeR * 0.85, tubeR * 0.85]} />
+                  <meshStandardMaterial color={handwheelColor} roughness={0.48} metalness={0.5} />
+                </mesh>
+              ))}
+              <mesh>
+                <cylinderGeometry args={[hubR, hubR, tubeR * 2.2, 8]} />
+                <meshStandardMaterial color="#2a2c32" roughness={0.48} metalness={0.72} />
+              </mesh>
+            </group>
+          </group>
+        );
+      })()}
     </group>
   );
 }
@@ -747,10 +767,14 @@ export function ButterflyValve({
   const yPlateBottom = yNeckTop + bonnetH + pivotGap * 0.35;
   const yPivot = yPlateBottom + plateT * 0.5 + pivotGap;
 
-  /* Lever — longer / thicker grip than bare minimum for visibility at scene scale. */
-  const leverLen = THREE.MathUtils.clamp(D * 0.56, D * 0.44, D * 0.72);
-  const leverH = THREE.MathUtils.clamp(D * 0.06, 0.02, 0.072);
-  const leverW = THREE.MathUtils.clamp(D * 0.054, 0.018, 0.065);
+  /* Lever — sized for ergonomic operation regardless of pipe size. Real
+     lever-actuated butterfly valves use ~300–600 mm levers (operator torque
+     arm), independent of bore. Above ~10" pipe these become gear-operated
+     in real life, but we render a long lever so the valve still reads as
+     manually-actuated at scene scale. */
+  const leverLen = THREE.MathUtils.clamp(R_env * 4.0, 0.32, 0.72);
+  const leverH = THREE.MathUtils.clamp(leverLen * 0.090, 0.022, 0.075);
+  const leverW = THREE.MathUtils.clamp(leverLen * 0.080, 0.020, 0.065);
   /* Stem only above the opaque neck so it reads through bonnet / plate. */
   const yStemBottom = yNeckTop + THREE.MathUtils.clamp(D * 0.012, 0.004, 0.022);
   const yStemTop = yPivot - THREE.MathUtils.clamp(D * 0.02, 0.008, 0.028);
@@ -1090,6 +1114,31 @@ export function YStrainer({
           <meshStandardMaterial color="#d6a624" roughness={0.65} metalness={0.3} />
         </mesh>
       ) : null}
+      {/* Manual air-bleed petcock at the strainer-body high point
+         (pid `air_management` — manual petcocks at strainers).
+         Small bronze ball-cock with a horizontal red lever. */}
+      <group position={[-0.10, r * 1.18, 0]}>
+        {/* short threaded weld-o-let stub */}
+        <mesh>
+          <cylinderGeometry args={[0.022, 0.024, 0.060, 8]} />
+          <meshStandardMaterial color={STEEL} roughness={0.45} metalness={0.85} />
+        </mesh>
+        {/* bronze ball-cock body */}
+        <mesh position={[0, 0.055, 0]}>
+          <boxGeometry args={[0.055, 0.040, 0.055]} />
+          <meshStandardMaterial color={BRASS} roughness={0.4} metalness={0.85} />
+        </mesh>
+        {/* red lever (horizontal = closed) */}
+        <mesh position={[0.060, 0.055, 0]}>
+          <boxGeometry args={[0.090, 0.012, 0.012]} />
+          <meshStandardMaterial color={HANDWHEEL_RED} roughness={0.5} metalness={0.5} />
+        </mesh>
+        {/* tiny bleed-discharge nipple */}
+        <mesh position={[0, 0.090, 0]}>
+          <cylinderGeometry args={[0.010, 0.010, 0.025, 6]} />
+          <meshStandardMaterial color={STEEL} roughness={0.55} metalness={0.7} />
+        </mesh>
+      </group>
     </group>
   );
 }
@@ -1133,15 +1182,39 @@ export function DrainValve({
         <boxGeometry args={[0.11, 0.11, 0.11]} />
         <meshStandardMaterial color={BRASS} roughness={0.35} metalness={0.9} />
       </mesh>
-      {/* hose-end / cap */}
+      {/* hose-bib threaded spout — 3/4" GHT (Garden-Hose Thread) */}
       <mesh position={[0, -r - 0.34, 0]}>
         <cylinderGeometry args={[0.05, 0.055, 0.09, 10]} />
         <meshStandardMaterial color={BRASS} roughness={0.4} metalness={0.85} />
       </mesh>
-      {/* chained dust cap */}
+      {/* visible thread ridges (4 rings on the hose-bib spout) */}
+      {[-0.025, -0.008, 0.009, 0.026].map((dy, ti) => (
+        <mesh key={`thr-${ti}`} position={[0, -r - 0.34 + dy, 0]}>
+          <torusGeometry args={[0.052, 0.0035, 6, 14]} />
+          <meshStandardMaterial color="#a07628" roughness={0.45} metalness={0.85} />
+        </mesh>
+      ))}
+      {/* anchor lug on the bib body for the cap chain */}
+      <mesh position={[0.06, -r - 0.31, 0]}>
+        <sphereGeometry args={[0.012, 8, 6]} />
+        <meshStandardMaterial color="#a07628" roughness={0.45} metalness={0.85} />
+      </mesh>
+      {/* short bead chain from anchor lug to dust cap */}
+      <mesh
+        position={[0.066, -r - 0.355, 0.02]}
+        rotation={[Math.PI / 6, 0, Math.PI / 5]}
+      >
+        <cylinderGeometry args={[0.0030, 0.0030, 0.075, 6]} />
+        <meshStandardMaterial color="#5a5a5a" roughness={0.6} metalness={0.55} />
+      </mesh>
+      {/* chained dust cap (covers the hose threads when not in use) */}
       <mesh position={[0.07, -r - 0.39, 0.04]}>
-        <cylinderGeometry args={[0.035, 0.035, 0.05, 8]} />
+        <cylinderGeometry args={[0.038, 0.038, 0.045, 8]} />
         <meshStandardMaterial color="#222" roughness={0.7} metalness={0.4} />
+      </mesh>
+      <mesh position={[0.07, -r - 0.413, 0.04]}>
+        <cylinderGeometry args={[0.040, 0.040, 0.008, 8]} />
+        <meshStandardMaterial color="#1a1a1a" roughness={0.7} metalness={0.4} />
       </mesh>
       <group ref={leverRef} position={[0, -r - 0.18, 0.08]}>
         <mesh>

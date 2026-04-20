@@ -64,11 +64,14 @@ export const SKID_HEIGHT = 0.20;                     // concrete housekeeping pa
 export const VFD_OFFSET_Z = 2.95;                    // VFD enclosure wall-mount stand-off from pump CL
 export const ELBOW_R_FACTOR = 4.5;                   // long-radius elbow R / pipe radius
 
-/* ─────────── ASHRAE 2026 service colors ─────────── */
+/* ─────────── ASHRAE 2026 service colors ───────────
+   Values are kept in sync with the rooftop main risers / engine-room
+   headers in App.tsx so the bridge tie-ins are seamless with the loops
+   they connect to (no visible color step at the welded tees). */
 export const PUMP_COLOR = {
-  CWS: '#1f5a3a',           // dark green
-  CHR: '#4a8ab8',           // light blue
-  CHS: '#2c4a72',           // dark blue
+  CWS: '#1d7a3a',           // dark green — matches App.tsx CWS riser
+  CHR: '#4a8ab8',           // light blue — matches App.tsx CHWR
+  CHS: '#0d3f7a',           // dark blue  — matches App.tsx CHWS
   insulation: '#d4d6da',
 } as const;
 const COLOR = PUMP_COLOR;
@@ -471,35 +474,53 @@ function VerticalPipe({
 }
 
 /* ============================================================================
-   Long-radius 90° elbow in the XY plane (turns +Y descent into +X horizontal,
-   with the torus arc placed so it tangentially mates the riser bottom and the
-   horizontal suction spool inboard end).
+   Long-radius 90° elbow in the XY plane — turns a DESCENDING riser (−Y flow)
+   into a HORIZONTAL run (+X when toward=+1, −X when toward=−1).
+
+   Geometry derivation (toward=+1):
+     Three.js TorusGeometry default: ring in XY plane, phi sweeps CCW around Z.
+       phi=0   → tube centre at (+R,  0, 0), tangent = (0, +R, 0)  [+Y]
+       phi=π/2 → tube centre at ( 0, +R, 0), tangent = (−R, 0, 0) [−X]
+     Apply Euler XYZ rotation [π, 0, π/2]:
+       phi=0   → centre (0, +R, 0), tangent (+R, 0, 0)  [+X ← horizontal exit]
+       phi=π/2 → centre (−R, 0, 0), tangent (0, −R, 0)  [−Y ← riser entry]
+     With torus centre at (xElbow + R, shaftY − R, z):
+       phi=0 (exit)  → world pos (xElbow+R, shaftY, z) at y = shaftY  ✓
+       phi=π/2 (entry) → world pos (xElbow, shaftY−R, z) at x = xElbow ✓
+     The riser must therefore terminate at y = shaftY − R (not shaftY).
+     The horizontal pipe starts at x = xElbow + R.
+
+   For toward=−1 (CHWP discharge up-riser turns leftward):
+     Mirror: centre at (xElbow − R, shaftY − R), rotation [π, 0, −π/2].
 ============================================================================ */
 function ElbowYtoX({
-  xElbow,
-  yElbow,
+  xElbowCenter,
+  yElbowCenter,
   z,
+  elbowR,
   pipeRadius = PIPE_R,
   pipeColor,
-  /** +1 turns toward +X (riser at -X side going right), -1 turns toward -X. */
   toward = +1,
 }: {
-  xElbow: number;
-  yElbow: number;
+  /** Pre-computed torus centre X  = xRiser ± elbowR  (from computeAssemblyLayout). */
+  xElbowCenter: number;
+  /** Pre-computed torus centre Y  = shaftY − elbowR  (from computeAssemblyLayout). */
+  yElbowCenter: number;
   z: number;
+  /** Same elbowR used in computeAssemblyLayout. */
+  elbowR: number;
   pipeRadius?: number;
   pipeColor: string;
   toward?: 1 | -1;
 }) {
-  const R = pipeRadius * 4.5; // long-radius
-  /* Torus default sits in XY plane, arc 0..π/2. We want a quarter that
-     joins the bottom of a vertical riser to the horizontal pipe. */
   return (
     <mesh
-      position={[xElbow + toward * R * 0, yElbow, z]}
-      rotation={toward > 0 ? [0, 0, Math.PI] : [0, 0, Math.PI / 2]}
+      position={[xElbowCenter, yElbowCenter, z]}
+      rotation={toward > 0
+        ? [Math.PI, 0,  Math.PI / 2]
+        : [Math.PI, 0, -Math.PI / 2]}
     >
-      <torusGeometry args={[R, pipeRadius, 12, 22, Math.PI / 2]} />
+      <torusGeometry args={[elbowR, pipeRadius, 12, 22, Math.PI / 2]} />
       <meshStandardMaterial color={pipeColor} roughness={0.55} metalness={0.45} />
     </mesh>
   );
@@ -711,8 +732,24 @@ export function computeAssemblyLayout(duty: 'chw' | 'cdw') {
 
   const sucRunLen = SUCTION_RUN_DIA_MULT * (PIPE_R * 2);
   const xElbow = suctionPipeFaceX - sucRunLen;
-  const yElbow = shaftY;
   const xRiser = xElbow;
+
+  /* Long-radius elbow turning the descending riser into the horizontal suction
+     run.  R is the standard 4.5× long-radius, but capped so that the riser
+     bottom (shaftY − R) stays at least 20 mm above the floor slab (y = 0).
+     This matters because shaftY ≈ 0.88 m and the nominal R = 0.90 m would put
+     the elbow bottom 18 mm below grade. */
+  const elbowR = Math.min(PIPE_R * ELBOW_R_FACTOR, shaftY - 0.02);
+
+  /* Correct elbow geometry (DOWN → RIGHT, toward = +1):
+       torus center  : (xElbow + elbowR, shaftY − elbowR, z)
+       riser entry   : center + (−elbowR, 0) = (xElbow, shaftY − elbowR)  ← bottom of riser
+       horiz exit    : center + (0, +elbowR) = (xElbow + elbowR, shaftY)   ← start of horiz pipe
+     The horizontal pipe therefore starts at xElbow + elbowR. */
+  const xElbowCenter = xElbow + elbowR;   // torus center X
+  const yElbowCenter = shaftY - elbowR;   // torus center Y
+  const xHorizStart  = xElbow + elbowR;   // where horiz pipe leaves the elbow
+  const yRiserBottom = shaftY - elbowR;   // bottom of the vertical riser
 
   /* Suction train (left → right toward pump): elbow → spool → eccentric reducer
      (CDW only) → spool → suction gate → spool → suction face. */
@@ -721,17 +758,26 @@ export function computeAssemblyLayout(duty: 'chw' | 'cdw') {
   const xReducerStart = xElbow + (duty === 'cdw' ? 0.10 : 0);
 
   /* Vertical riser train (top → bottom): ceiling → spool → vertical gate →
-     spool → Y-strainer → short stub → elbow apex. */
-  const yElbowExitTop = yElbow + 0.05; // small lift before elbow apex
-  const yStrainerCenter = yElbowExitTop + 0.55;
+     spool → Y-strainer → short stub → bottom of elbow arc. */
+  const yStrainerCenter = yRiserBottom + 0.55;
   const yGateRiser = yStrainerCenter + 1.20;
 
   /* Discharge train (left → right away from pump): face → check → gate → FT
-     → tie-off. */
+     → tie-off → short horizontal stub → elbow → vertical CHS up-riser. */
   const xCheck = dischargePipeFaceX + 0.45;
   const xGateDis = xCheck + 0.62;
   const xFt = xGateDis + 0.55;
   const xDischargeOut = xFt + 0.45;
+
+  /* CHWP discharge up-riser elbow (RIGHT → UP, toward = −1):
+       Horizontal stub ends at xH = xDischargeOut + 0.65.
+       Elbow: rotation [0, π, 0]; centre at (xH, shaftY − elbowR, z).
+         phi=π/2 entry: centre + (0, +elbowR) = (xH, shaftY)     ← horiz end ✓
+         phi=0   exit:  centre + (−elbowR, 0) = (xH−elbowR, shaftY−elbowR) → tangent +Y
+       Riser centre-line X = xH − elbowR; riser starts at y = shaftY − elbowR. */
+  const xDischargeHorizEnd = xDischargeOut + 0.65;
+  const xDischargeRiserX   = xDischargeHorizEnd - elbowR;   // riser CL (was xH + elbowR — now LEFT of stub end)
+  const yDischargeElbowCY  = shaftY - elbowR;               // elbow centre Y (also riser start Y)
 
   return {
     ports,
@@ -743,10 +789,13 @@ export function computeAssemblyLayout(duty: 'chw' | 'cdw') {
     xReducerEnd,
     xReducerStart,
     xElbow,
-    yElbow,
+    elbowR,
+    xElbowCenter,
+    yElbowCenter,
+    xHorizStart,
+    yRiserBottom,
     /* vertical riser */
     xRiser,
-    yElbowExitTop,
     yStrainerCenter,
     yGateRiser,
     /* discharge train */
@@ -755,6 +804,9 @@ export function computeAssemblyLayout(duty: 'chw' | 'cdw') {
     xGateDis,
     xFt,
     xDischargeOut,
+    xDischargeHorizEnd,
+    xDischargeRiserX,
+    yDischargeElbowCY,
   };
 }
 
@@ -806,13 +858,18 @@ function PumpAssemblyBody({
         paint={paint}
       />
 
-      {/* ===================== SUCTION TRAIN (vertical → horizontal) ===================== */}
-      {/* 1. Vertical riser dropping from the ceiling penetration */}
+      {/* ===================== SUCTION TRAIN (vertical → horizontal) =====================
+           Vertical fitting half-widths (fitting axis along Y when rotation=[0,0,π/2]):
+             GateValve  : 0.144 m (bodyHalfLen + flangeT = 0.11 + 0.034)
+             YStrainer  : 0.245 m (flangeCtrX + flangeT/2 = 0.22 + 0.025)
+      */}
+      {/* 1. Vertical riser dropping from the ceiling penetration down to the
+             top flange face of the isolation gate valve */}
       <VerticalPipe
         x={layout.xRiser}
         z={0}
         y0={CEILING_Y}
-        y1={layout.yGateRiser + 0.30}
+        y1={layout.yGateRiser + 0.144}
         pipeColor={pipeColorSuction}
         insulated
       />
@@ -830,11 +887,12 @@ function PumpAssemblyBody({
         pipeRadius={PIPE_R}
         bodyColor={pipeColorSuction}
       />
+      {/* Pipe from gate bottom face to Y-strainer top face */}
       <VerticalPipe
         x={layout.xRiser}
         z={0}
-        y0={layout.yGateRiser - 0.30}
-        y1={layout.yStrainerCenter + 0.30}
+        y0={layout.yGateRiser - 0.144}
+        y1={layout.yStrainerCenter + 0.245}
         pipeColor={pipeColorSuction}
       />
 
@@ -846,27 +904,31 @@ function PumpAssemblyBody({
         bodyColor={pipeColorSuction}
         idBand={false}
       />
+      {/* Pipe from strainer bottom face down to the riser entry of the elbow */}
       <VerticalPipe
         x={layout.xRiser}
         z={0}
-        y0={layout.yStrainerCenter - 0.30}
-        y1={layout.yElbowExitTop}
+        y0={layout.yStrainerCenter - 0.245}
+        y1={layout.yRiserBottom}
         pipeColor={pipeColorSuction}
       />
 
-      {/* 4. Long-radius 90° elbow Y → X */}
+      {/* 4. Long-radius 90° elbow — turns descending riser into horizontal suction run.
+             Torus centre = (xElbowCenter, yElbowCenter); rotation [π, 0, π/2].
+             Entry at (xRiser, yRiserBottom), exit at (xHorizStart, shaftY). */}
       <ElbowYtoX
-        xElbow={layout.xElbow}
-        yElbow={layout.yElbow}
+        xElbowCenter={layout.xElbowCenter}
+        yElbowCenter={layout.yElbowCenter}
         z={0}
+        elbowR={layout.elbowR}
         pipeRadius={PIPE_R}
         pipeColor={pipeColorSuction}
         toward={+1}
       />
 
-      {/* 5. Horizontal suction spool out of the elbow */}
+      {/* 5. Horizontal suction spool from elbow exit to reducer / gate. */}
       <HorizPipe
-        x0={layout.xElbow + PIPE_R * 4.5}
+        x0={layout.xHorizStart}
         x1={layout.xReducerStart}
         y={yCL}
         z={0}
@@ -885,10 +947,12 @@ function PumpAssemblyBody({
         />
       ) : null}
 
-      {/* 7. Spool from reducer outlet (or elbow exit for CHW) to the suction gate */}
+      {/* 7. Spool from reducer outlet (or elbow exit for CHW) to the suction gate.
+             Gate half-width = bodyHalfLen + flangeT = 0.11 + 0.034 = 0.144 m at PIPE_R=0.20.
+             Spool must end flush at the gate's pipe-facing flange face. */}
       <FlangedSpool
         x0={layout.xReducerEnd}
-        x1={layout.xGateSuc - 0.30}
+        x1={layout.xGateSuc - 0.144}
         y={yCL}
         pipeRadius={PIPE_R}
         pipeColor={pipeColorSuction}
@@ -901,8 +965,9 @@ function PumpAssemblyBody({
         pipeRadius={PIPE_R}
         bodyColor={pipeColorSuction}
       />
+      {/* Spool from gate right face to pump suction flange face — 0.144 m half-width */}
       <FlangedSpool
-        x0={layout.xGateSuc + 0.28}
+        x0={layout.xGateSuc + 0.144}
         x1={layout.suctionPipeFaceX}
         y={yCL}
         pipeRadius={PIPE_R}
@@ -922,12 +987,17 @@ function PumpAssemblyBody({
       />
       <TestPort position={[layout.xGateSuc - 0.20, yCL, 0]} pipeRadius={PIPE_R} />
 
-      {/* ===================== DISCHARGE TRAIN ===================== */}
+      {/* ===================== DISCHARGE TRAIN =====================
+           Spool half-widths used to butt-connect spools to fittings:
+             GateValve  : bodyHalfLen + flangeT = 0.11 + 0.034 = 0.144 m
+             CheckValve : flangeCtrX  + flangeT/2 = 0.22 + 0.025 = 0.245 m
+             InlineFT   : body flange at ±0.21 m, flange half-T 0.025 m → 0.235 m
+      */}
       <FlangedSpool
         x0={layout.dischargePipeFaceX}
-        x1={layout.xCheck - 0.30}
+        x1={layout.xCheck - 0.245}
         y={yCL}
-        z={0.10}
+        z={0}
         pipeRadius={PIPE_R}
         pipeColor={pipeColorDischarge}
       />
@@ -937,9 +1007,10 @@ function PumpAssemblyBody({
         pipeRadius={PIPE_R}
         bodyColor={pipeColorDischarge}
       />
+      {/* Spool from check right face to discharge gate left face */}
       <FlangedSpool
-        x0={layout.xCheck + 0.30}
-        x1={layout.xGateDis - 0.28}
+        x0={layout.xCheck + 0.245}
+        x1={layout.xGateDis - 0.144}
         y={yCL}
         pipeRadius={PIPE_R}
         pipeColor={pipeColorDischarge}
@@ -951,9 +1022,10 @@ function PumpAssemblyBody({
         pipeRadius={PIPE_R}
         bodyColor={pipeColorDischarge}
       />
+      {/* Spool from gate right face to FT left flange face */}
       <FlangedSpool
-        x0={layout.xGateDis + 0.28}
-        x1={layout.xFt - 0.22}
+        x0={layout.xGateDis + 0.144}
+        x1={layout.xFt - 0.235}
         y={yCL}
         pipeRadius={PIPE_R}
         pipeColor={pipeColorDischarge}
@@ -964,6 +1036,14 @@ function PumpAssemblyBody({
         pipeRadius={PIPE_R}
         bodyColor={pipeColorDischarge}
         tag={ftTag}
+      />
+      {/* Spool from FT right flange face to xDischargeOut */}
+      <FlangedSpool
+        x0={layout.xFt + 0.235}
+        x1={layout.xDischargeOut}
+        y={yCL}
+        pipeRadius={PIPE_R}
+        pipeColor={pipeColorDischarge}
       />
       {/* Discharge instruments — local PG, TG and Schrader test port */}
       <PressureGauge
@@ -983,7 +1063,7 @@ function PumpAssemblyBody({
         position={[layout.voluteX, yCL + 0.85, 0.42]}
         tag={pdiTag}
         suctionTapWorld={[layout.suctionPipeFaceX + 0.05, yCL + PIPE_R, 0]}
-        dischargeTapWorld={[layout.dischargePipeFaceX - 0.05, yCL + PIPE_R, 0.10]}
+        dischargeTapWorld={[layout.dischargePipeFaceX - 0.05, yCL + PIPE_R, 0]}
       />
 
       {/* ===================== LOW-POINT DRAIN AT VOLUTE =====================
@@ -1139,9 +1219,10 @@ export function CHWPPumpAssembly({
   /* Concrete skid footprint matches the long-coupled pump/motor baseplate
      (long in Z, short in X, centered on assembly midpoint). */
   const baseFoot = getPumpBaseFootprint(PIPE_R, 'chw');
-  /* CHWP discharge tail — short horizontal spool then up-riser toward ceiling.
-     The up-riser top connects (via PumpHydraulicTieIns) to the CHWS low header. */
-  const dischargeRiserX = layout.xDischargeOut + 0.65 + PIPE_R * ELBOW_R_FACTOR;
+  /* CHWP discharge tail — short horizontal spool, RIGHT→UP elbow, then vertical
+     CHS up-riser toward ceiling. The riser X and Y start are pre-computed in
+     the layout (xDischargeRiserX, yDischargeElbowCY). */
+  const dischargeRiserX = layout.xDischargeRiserX;
   return (
     <group name={`pump-assembly:${tag}`} position={position} rotation={rotation}>
       {/* Reinforced-concrete inertia pad */}
@@ -1161,28 +1242,33 @@ export function CHWPPumpAssembly({
         drainValveId={drainValveId}
       />
       {/* CHWP discharge tail:
-            flange → horizontal stub → 90° long-radius elbow → vertical CHS riser up.
-          The riser exits through the ceiling at (dischargeRiserX, CEILING_Y, 0) in
-          assembly-local space; the parent scene bridges this to the CHWS low header. */}
+            flange → horizontal stub → 90° RIGHT→UP elbow → vertical CHS riser up.
+          Elbow geometry (rotation [0,π,0]):
+            phi=π/2 entry: (xDischargeHorizEnd, shaftY) — end of horiz stub ✓
+            phi=0   exit:  (xDischargeRiserX,   yDischargeElbowCY) — riser base ✓
+          The riser exits through the ceiling at (dischargeRiserX, CEILING_Y, 0);
+          PumpHydraulicTieIns bridges this to the CHWS low header. */}
       <HorizPipe
         x0={layout.xDischargeOut}
-        x1={layout.xDischargeOut + 0.65}
+        x1={layout.xDischargeHorizEnd}
         y={layout.shaftY}
         z={0}
         pipeColor={COLOR.CHS}
       />
-      <ElbowYtoX
-        xElbow={layout.xDischargeOut + 0.65}
-        yElbow={layout.shaftY}
-        z={0}
-        pipeRadius={PIPE_R}
-        pipeColor={COLOR.CHS}
-        toward={-1}
-      />
+      {/* RIGHT→UP elbow: centre = (xDischargeHorizEnd, yDischargeElbowCY).
+          rotation [0,π,0]: phi=0→tube at (−elbowR,0)+centre → (+Y tangent exit),
+                            phi=π/2→tube at (0,+elbowR)+centre → (+X tangent entry). */}
+      <mesh
+        position={[layout.xDischargeHorizEnd, layout.yDischargeElbowCY, 0]}
+        rotation={[0, Math.PI, 0]}
+      >
+        <torusGeometry args={[layout.elbowR, PIPE_R, 12, 22, Math.PI / 2]} />
+        <meshStandardMaterial color={COLOR.CHS} roughness={0.55} metalness={0.45} />
+      </mesh>
       <VerticalPipe
         x={dischargeRiserX}
         z={0}
-        y0={layout.shaftY + 0.05}
+        y0={layout.yDischargeElbowCY}
         y1={CEILING_Y}
         pipeColor={COLOR.CHS}
         insulated
