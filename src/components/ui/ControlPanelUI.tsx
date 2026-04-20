@@ -1,6 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSimulationStore } from '../../store/useSimulationStore';
 import { useInspectStore } from '../../store/useInspectStore';
+import { useWalkModeStore } from '../../store/useWalkModeStore';
 
 export function ControlPanelUI() {
   const { state } = useSimulationStore();
@@ -10,6 +11,8 @@ export function ControlPanelUI() {
   const hoveredPath = useInspectStore((s) => s.hoveredPath);
   const hoveredDetail = useInspectStore((s) => s.hoveredDetail);
   const copyFeedback = useInspectStore((s) => s.copyFeedback);
+  const walkMode = useWalkModeStore((s) => s.walkMode);
+  const setWalkMode = useWalkModeStore((s) => s.setWalkMode);
 
   return (
     <>
@@ -31,6 +34,19 @@ export function ControlPanelUI() {
             aria-pressed={inspectMode}
           >
             Inspect
+          </button>
+          <button
+            type="button"
+            onClick={() => setWalkMode(!walkMode)}
+            className={
+              walkMode
+                ? 'text-xs font-medium px-2.5 py-1 rounded border border-emerald-600 bg-emerald-950/80 text-emerald-100'
+                : 'text-xs font-medium px-2.5 py-1 rounded border border-[#3d4249] bg-[#23272c] text-[#bbb] hover:bg-[#2a2f35] hover:text-white'
+            }
+            aria-pressed={walkMode}
+            title="Drop a technician avatar into the room (Arrows / WASD to move, Shift to run, Esc to exit)"
+          >
+            Walk Mode
           </button>
           <StatusIndicator label="Compressor" active={state.compressorRunning} color="green" />
           <StatusIndicator label="Oil Heater" active={state.oilHeaterOn} color="amber" />

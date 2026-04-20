@@ -23,8 +23,8 @@ interface SimulationStore {
 }
 
 const defaultState: SimulationState = {
-  compressorRunning: false,
-  compressorSpeed: 0,
+  compressorRunning: true,
+  compressorSpeed: 78,
   suctionPressure: 58.5,
   dischargePressure: 185.0,
   suctionTemp: 44.2,
@@ -53,8 +53,8 @@ const defaultState: SimulationState = {
   suctionValveOpen: true,
   liquidLineValveOpen: true,
   economizerValveOpen: false,
-  condenserWaterFlowing: false,
-  evaporatorWaterFlowing: false,
+  condenserWaterFlowing: true,
+  evaporatorWaterFlowing: true,
   lastUpdate: Date.now(),
 };
 
