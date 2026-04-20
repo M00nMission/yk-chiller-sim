@@ -13,8 +13,24 @@ export const MAIN_FLOOR_Y = 0;
 /** Rooftop deck group is at y=12.05; slab half-height 0.19 → walk surface */
 export const ROOF_WALK_Y = 12.05 + 0.19;
 
-/** Horizontal bounds (main floor) — matches TechnicianController */
+/** Horizontal bounds (main floor, legacy — used as inside-room clamp before walls existed) */
 export const ROOM_BOUND = 32;
+
+/**
+ * Outdoor world clamp — applied on the main "ground level" layer so the
+ * technician can walk well past the building footprint onto the surrounding
+ * grass yard. The 3 enclosed walls (back/left/right) and equipment AABBs
+ * still block lateral movement; the +Z (south) face is open and lets the
+ * player exit the engine room onto the lawn.
+ */
+export const OUTDOOR_BOUND = 95;
+
+/** Building footprint (matches the 3 wall slabs in EngineRoom). */
+export const BUILDING_X_MIN = -35;
+export const BUILDING_X_MAX = 35;
+export const BUILDING_Z_MIN = -35;
+/** South face is open (no wall). Anything past here is "outside / yard". */
+export const BUILDING_Z_MAX = 35;
 
 /** Inner deck where footing is solid (landing / stand checks) */
 export const ROOF_SOLID_BOUND = 33;
@@ -36,25 +52,42 @@ export const PLAYER_COLLISION_HEIGHT = 1.82;
 export const PLAYER_AIR_COLLISION_HEIGHT = 0.92;
 
 /* ─── Shared piping layout (mirrors EngineRoom constants in App.tsx) ───── */
-const HEAD_Z = 4.65;
-const EVAP_X = -2.092;
-const CHW_X_SUPPLY = EVAP_X - 0.45;
-const CHW_X_RETURN = EVAP_X + 0.45;
-const CHW_Z_SUPPLY = -(HEAD_Z + 0.95);
-const CHW_Z_RETURN = -(HEAD_Z + 2.1);
+const EVAP_HEAD_Z = 4.759; void EVAP_HEAD_Z;  // evaporator barrel −Z end face — matches App.tsx
+const COND_HEAD_Z = 4.76;                     // condenser barrel +Z end face — matches App.tsx
+const EVAP_NOZZLE_X = -1.984;           // marine waterbox face center X (Cylinder018_Baked)
+const CHW_X_SUPPLY = EVAP_NOZZLE_X;   // -1.984 — on the barrel face, matches App.tsx
+const CHW_X_RETURN = EVAP_NOZZLE_X;   // -1.984 — same X; risers diverge in Z, matches App.tsx
+const CHW_Z_SUPPLY = -5.525;   // matches App.tsx -(HEAD_Z + 0.95) = -(4.575 + 0.95)
+const CHW_Z_RETURN = -6.675;   // matches App.tsx -(HEAD_Z + 2.10) = -(4.575 + 2.10)
 const AHU_X = -22;
 const HEADER_Y = 1.1;
-const MAIN_PIPE_INS_R = 0.3 + 0.1;
+const MAIN_PIPE_INS_R = 0.22 + 0.07;     // 17″ Sch.40 + 7 cm closed-cell jacket (matches App.tsx)
 
-const CW_X_SUPPLY = 0.335;
-const CW_X_RETURN = -0.335;
-const CW_Z_SUPPLY = HEAD_Z + 0.95;
-const CW_Z_RETURN = HEAD_Z + 2.1;
-const CW_Y_FLANGE = 2.05;
-const CDW_BARREL_R = 0.35;
-const ENG_BOT_Y = CW_Y_FLANGE - CDW_BARREL_R - 0.04;
+/* CDW risers: supply at X=0, return offset +0.55 m in X so its elbow
+   arc and riser clear the supply riser that rises straight up at X=0.
+   Both flanges bolt onto the +Z condenser barrel face at COND_HEAD_Z.
+   Mirrors App.tsx CW_X_SUPPLY / CW_X_RETURN and PidPlantSystems CW_XS/CW_XR. */
+const CW_X_SUPPLY = 0.0;
+const CW_X_RETURN = 0.55;   // offset in X to clear the supply riser — matches App.tsx CW_X_RETURN
+/* CDW risers measured off the actual condenser barrel face so they
+   land at exactly z=+5.60 (sup) / +6.75 (ret) — matches App.tsx
+   CW_Z_SUPPLY/RETURN and PidPlantSystems CW_ZS/CW_ZR. */
+const CW_Z_SUPPLY = COND_HEAD_Z + 0.84;
+const CW_Z_RETURN = COND_HEAD_Z + 1.99;
+/* Per-circuit nozzle-CL Y on the head face (matches App.tsx
+   COND_NOZZLE_Y_INL / COND_NOZZLE_Y_OUT — vertically stacked on the
+   centerline per the YORK YK marine waterbox convention). */
+const CW_Y_FLG_SUP = 0.30;                // lower (CWS inlet)
+const CW_Y_FLG_RET = 1.30;                // upper (CWR outlet)
+const CDW_BARREL_R = 0.30;
+/* Engine-room riser bottom Y per circuit (riser-side tangent of the
+   barrel-head 90° elbow — see App.tsx for the same derivation). The
+   two CDW circuits start at very different elevations because their
+   nozzles are stacked vertically on the head-face centerline. */
+const ENG_BOT_Y_SUP = CW_Y_FLG_SUP - CDW_BARREL_R - 0.04;     // -0.04 (riser bottom right at floor)
+const ENG_BOT_Y_RET = CW_Y_FLG_RET - CDW_BARREL_R - 0.04;     //  0.96 (riser bottom ~1 m AFF)
 const ROOF_MAIN_Y = 12.55;
-const ROOF_ELBOW_R = 0.45;
+const ROOF_ELBOW_R = 0.40;
 const ENG_TOP_Y = ROOF_MAIN_Y - ROOF_ELBOW_R;
 const CW_TOWER_FLG_X = 23;
 const TWR_X = CW_TOWER_FLG_X + 0.95;
@@ -117,19 +150,56 @@ const CHW_HEADER_AABBS: Aabb[] = [
 ];
 
 /** CDW engine-room risers (includes inline gate valve envelope). */
-const CDW_RISER_AABBS: Aabb[] = [CW_X_SUPPLY, CW_X_RETURN].map((xR) => {
-  const zs = xR === CW_X_SUPPLY ? CW_Z_SUPPLY : CW_Z_RETURN;
-  return {
-    x0: xR - 0.48,
-    x1: xR + 0.48,
-    z0: zs - 0.48,
-    z1: zs + 0.48,
-    y0: ENG_BOT_Y - 0.05,
-    y1: ENG_TOP_Y + 0.35,
-  };
-});
+const CDW_RISER_AABBS: Aabb[] = (
+  [
+    [CW_X_SUPPLY, CW_Z_SUPPLY, ENG_BOT_Y_SUP],
+    [CW_X_RETURN, CW_Z_RETURN, ENG_BOT_Y_RET],
+  ] as const
+).map(([xR, zs, yBot]) => ({
+  x0: xR - 0.48,
+  x1: xR + 0.48,
+  z0: zs - 0.48,
+  z1: zs + 0.48,
+  y0: yBot - 0.05,
+  y1: ENG_TOP_Y + 0.35,
+}));
+
+/* ─── Engine-room walls (back / left / right). +Z face is the open south
+   entrance — leave it un-blocked so the technician can walk onto the lawn. */
+const WALL_THICKNESS = 0.5;
+const WALL_HEIGHT = 12.0;
+const WALL_AABBS: Aabb[] = [
+  /* Back wall (z = -35) */
+  {
+    x0: BUILDING_X_MIN - WALL_THICKNESS,
+    x1: BUILDING_X_MAX + WALL_THICKNESS,
+    z0: BUILDING_Z_MIN - WALL_THICKNESS / 2,
+    z1: BUILDING_Z_MIN + WALL_THICKNESS / 2,
+    y0: 0,
+    y1: WALL_HEIGHT,
+  },
+  /* Left wall (x = -35) — gap at the +Z face for the open entrance */
+  {
+    x0: BUILDING_X_MIN - WALL_THICKNESS / 2,
+    x1: BUILDING_X_MIN + WALL_THICKNESS / 2,
+    z0: BUILDING_Z_MIN - WALL_THICKNESS,
+    z1: BUILDING_Z_MAX + WALL_THICKNESS,
+    y0: 0,
+    y1: WALL_HEIGHT,
+  },
+  /* Right wall (x = +35) */
+  {
+    x0: BUILDING_X_MAX - WALL_THICKNESS / 2,
+    x1: BUILDING_X_MAX + WALL_THICKNESS / 2,
+    z0: BUILDING_Z_MIN - WALL_THICKNESS,
+    z1: BUILDING_Z_MAX + WALL_THICKNESS,
+    y0: 0,
+    y1: WALL_HEIGHT,
+  },
+];
 
 const MAIN_AABBS: Aabb[] = [
+  ...WALL_AABBS,
   ...CHW_HEADER_AABBS,
   ...CDW_RISER_AABBS,
   /* Pipe support saddles (CHW mains, −X side of room) */

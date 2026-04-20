@@ -1308,11 +1308,17 @@ export function FlangedConnection({
   rotation = [0, 0, 0],
   pipeRadius = 0.30,
   bodyColor = '#5a5854',
+  vesselNeckColor,
   boltCount = 8,
   showVesselNeck = true,
   showPipeNeck = true,
 }: AccessoryBase & {
   bodyColor?: string;
+  /** Override colour for the vessel-side weld-neck taper. Used when the
+   *  vessel itself is a different colour than the connecting pipe (e.g. a
+   *  flange welded straight into a beige chiller barrel). Falls back to
+   *  bodyColor when omitted so existing call sites are unaffected. */
+  vesselNeckColor?: string;
   /** Bolt count around the bolt circle (typ. 8 for 6", 12 for 12"). */
   boltCount?: number;
   /** Render the vessel-side welded neck taper (local −X). */
@@ -1320,6 +1326,7 @@ export function FlangedConnection({
   /** Render the pipe-side welded neck taper (local +X). */
   showPipeNeck?: boolean;
 }) {
+  const vesselColor = vesselNeckColor ?? bodyColor;
   const r            = pipeRadius;
   const flangeOuter  = r * 1.55;
   const raisedFaceR  = r * 1.18;
@@ -1337,7 +1344,7 @@ export function FlangedConnection({
       {showVesselNeck && (
         <mesh position={[-neckCtrX, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
           <cylinderGeometry args={[r * 1.20, r * 1.04, neckLen, 18]} />
-          <meshStandardMaterial color={bodyColor} roughness={0.55} metalness={0.65} />
+          <meshStandardMaterial color={vesselColor} roughness={0.55} metalness={0.65} />
         </mesh>
       )}
       {/* ── VESSEL-SIDE flange disc ── */}

@@ -1,0 +1,123 @@
+{
+  "task": "You are an expert HVAC mechanical design engineer and 3D simulation developer. Generate or update the 3D browser-based web app simulation for a complete YORK water-cooled chiller system. The simulation must ENSURE that every component listed below is installed in the correct 3D location, with correct connectivity, proper orientation, and accurate visual representation according to the specification. Do not omit anything. The output should include scene hierarchy, component positions, piping routes, valve/instrument placements, electrical routing, and color/material assignments for a realistic, interactive 3D model (Three.js / Babylon.js / similar).",
+
+  "system_overview": "Realistic 3D simulation of one YORK water-cooled chiller in the engine room supplying chilled water to one Rooftop AHU/RTU. Condenser water loop cooled by one rooftop open-circuit HVAC cooling tower. Both cooling tower and AHU/RTU are on the rooftop. Engine room contains chiller, pumps, and electrical service. All components must be modeled with proper scale, connections, and labels for educational/training/simulation purposes.",
+
+  "must_install_components": {
+    "makeup_water_loop": [
+      "Makeup water supply line routed to cooling tower basin on rooftop",
+      "Isolation valve + backflow preventer (RPZ)",
+      "Pressure Reducing Valve (PRV)",
+      "Float-operated level control valve (LC) or solenoid with level switch (LS)",
+      "Air gap at basin entry",
+      "Basin overflow/drain line with isolation valve routed to roof drain"
+    ],
+    "chemical_treatment": [
+      "Chemical fill tank / pot feeder in engine room near chiller",
+      "Chemical feed line with isolation valves, check valve, and injection quill into cooling tower basin or CWR line",
+      "Separate shot feeder for closed chilled water loop connected to CHR line"
+    ],
+    "air_management": [
+      "Automatic air vents at highest point of every vertical riser on rooftop (CWS, CWR, CHS, CHR)",
+      "Automatic air vents at top of AHU coil and chiller heat exchangers",
+      "Manual petcocks at chiller, pumps, and strainers"
+    ],
+    "pressure_regulation": [
+      "Bladder expansion tank on CHR suction line to CHWP in engine room",
+      "Pressure Relief Valve (PSV) on expansion tank and chiller condenser outlet",
+      "PRV station on makeup water or chilled water fill line"
+    ],
+    "drains": [
+      "Low-point drain valves with hose bibs at bottom of chiller evaporator, condenser, both pumps, AHU coil, and piping low points",
+      "All drains routed to floor drains in engine room or roof drains on rooftop"
+    ],
+    "pressure_test_ports": [
+      "Pete’s plugs / Schrader test ports at pump suction/discharge, chiller in/out (both sides), across strainers, and at AHU coil"
+    ],
+    "pumps": [
+      "CDWP on CWS line in engine room: suction isolation gate valve → Y-strainer → pump → discharge check valve → discharge isolation gate valve",
+      "CHWP on CHS line after chiller: same valve train",
+      "Each pump equipped with VFD mounted on adjacent wall or MCC"
+    ],
+    "electrical_system": [
+      "Main step-down transformer at engine room electrical entrance (utility line → transformer)",
+      "Main service disconnect/breaker right after transformer",
+      "Individual lockable disconnect switches at chiller, CDWP, CHWP, cooling tower fan, and AHU/RTU",
+      "VFDs for both pumps with local disconnects and bypass",
+      "Power and control wiring runs clearly routed along walls/ceiling/trays"
+    ],
+    "instruments": [
+      "FT, TT, PT on CWS, CWR, CHS, CHR mains (installed in straight pipe sections)",
+      "PDI across each pump and strainer",
+      "Local PG and TG at pump suction/discharge and chiller in/out",
+      "LC on cooling tower basin"
+    ]
+  },
+
+  "installation_locations_3d": {
+    "rooftop": {
+      "cooling_tower": "Positioned on left side of rooftop platform, elevated on structural supports",
+      "ahu_rtu": "Positioned on right side of rooftop, adjacent to cooling tower",
+      "risers": "Vertical CWS, CWR, CHS, CHR pipes penetrating roof into engine room below",
+      "makeup_water": "Enters from building side, routes across rooftop to basin",
+      "air_vents": "At highest points of all rooftop piping and equipment"
+    },
+    "engine_room": {
+      "chiller": "Centered in room, oriented with evaporator on left, condenser on right",
+      "cdwp": "On CWS supply line, near chiller condenser inlet",
+      "chwp": "On CHS supply line, immediately after chiller evaporator outlet",
+      "expansion_tank": "Mounted on wall or stand near CHWP suction side",
+      "chemical_tank": "On floor or shelf near chiller, accessible for filling",
+      "electrical_panel": "On wall near entrance, transformer outside or at entry point",
+      "vfd_mounting": "Wall-mounted near respective pumps"
+    }
+  },
+
+  "color_coding_standards_2026": {
+    "pipes": {
+      "CHS": "Dark Blue (supply)",
+      "CHR": "Light Blue (return)",
+      "CWS": "Dark Green (supply)",
+      "CWR": "Light Green (return)",
+      "makeup_water": "White with Green lettering",
+      "chemical_feed": "Orange with Black lettering",
+      "drain": "Gray with Black 'DRAIN' label"
+    },
+    "valves": "Body color matches connected pipe; handle in contrasting color (red for isolation, yellow for control)",
+    "instruments": "White or light gray ISA circles with black tags; sensor bodies in metallic silver",
+    "tanks": {
+      "expansion_tank": "Light Gray",
+      "chemical_fill_tank": "Orange",
+      "cooling_tower_basin": "Light Blue with water surface"
+    },
+    "electrical": {
+      "power_wiring_480V": "Black/Red/Blue phases, Green ground",
+      "control_wiring": "Blue for analog, Black for digital",
+      "vfd_enclosure": "Gray with yellow 'VFD' warning label",
+      "disconnect_switches": "Gray enclosure with red handle"
+    },
+    "equipment": "Chiller and pumps in metallic gray with YORK branding on chiller; AHU/RTU in white/gray cabinet"
+  },
+
+  "visual_and_interaction_requirements": {
+    "labels": "All pipes labeled with service name (CHS, CWR, etc.), flow arrows, and color bands per ASME A13.1",
+    "tooltips": "Clicking any component shows detailed info (tag, spec, installation note)",
+    "animation": "Water flow animation in pipes (color-coded), pump rotation, fan rotation on tower and AHU",
+    "layers": "Toggleable layers for hydronic, electrical, instrumentation, and drains",
+    "legend": "Include a full color/material legend in the UI matching 2026 US commercial standards"
+  },
+
+  "output_expectations": {
+    "deliverables": [
+      "Scene hierarchy / component tree for the 3D model",
+      "Position and rotation data for all major equipment and risers",
+      "Piping route descriptions (from cooling tower → chiller → AHU and back)",
+      "Exact placement rules for every valve, instrument, VFD, disconnect, air vent, drain, and test port",
+      "Material and color assignments per the color_coding_standards_2026",
+      "List of interactive elements and tooltips"
+    ],
+    "verification": "Explicitly list and confirm that every item in 'must_install_components' has been installed according to 'installation_locations_3d' and colored according to 'color_coding_standards_2026'. The 3D simulation must be accurate enough for training, design review, or virtual commissioning in a commercial/industrial USA 2026 context."
+  },
+
+  "notes": "The simulation must reflect real-world installation practices. Rooftop equipment is exposed to weather. Engine room is indoor. Use realistic scaling. All vertical risers must penetrate the roof correctly. Prioritize clarity, safety labeling, and educational value."
+}

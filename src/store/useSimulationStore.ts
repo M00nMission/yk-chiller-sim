@@ -105,6 +105,20 @@ const defaultValves: ValveState[] = [
   { id: 'pipe_drain_cdws_riser_base', type: 'drain', open: false, position: 0 },
   { id: 'pipe_drain_cdwr_riser_base', type: 'drain', open: false, position: 0 },
   { id: 'pipe_drain_cdws_roof', type: 'drain', open: false, position: 0 },
+  /* PID pump trains + tower overflow + chiller low-point drains */
+  { id: 'pipe_gate_cdwp_suction', type: 'gate', open: true, position: 1 },
+  { id: 'pipe_gate_cdwp_suction-close', type: 'gate', open: true, position: 1 },
+  { id: 'pipe_gate_cdwp_discharge', type: 'gate', open: true, position: 1 },
+  { id: 'pipe_gate_chwp_suction', type: 'gate', open: true, position: 1 },
+  { id: 'pipe_gate_chwp_suction-close', type: 'gate', open: true, position: 1 },
+  { id: 'pipe_gate_chwp_discharge', type: 'gate', open: true, position: 1 },
+  { id: 'pipe_gate_tower_overflow', type: 'gate', open: true, position: 1 },
+  { id: 'pipe_drain_evap_low', type: 'drain', open: false, position: 0 },
+  { id: 'pipe_drain_cond_low', type: 'drain', open: false, position: 0 },
+  /* pid.json drains — pump volute low points + AHU coil header */
+  { id: 'pipe_drain_cdwp_low', type: 'drain', open: false, position: 0 },
+  { id: 'pipe_drain_chwp_low', type: 'drain', open: false, position: 0 },
+  { id: 'pipe_drain_ahu_coil', type: 'drain', open: false, position: 0 },
 ];
 
 const defaultStartupSteps: StartupStep[] = [

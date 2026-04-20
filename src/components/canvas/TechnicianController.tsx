@@ -23,7 +23,7 @@ import { useWalkModeStore } from '../../store/useWalkModeStore';
 import {
   MAIN_FLOOR_Y,
   ROOF_WALK_Y,
-  ROOM_BOUND,
+  OUTDOOR_BOUND,
   ROOF_MOVEMENT_BOUND,
   LADDER_ROOF_EXIT,
   inLadderVolume,
@@ -205,16 +205,26 @@ export function TechnicianController({
 
     const inShaft = inLadderVolume(x, z) && y < ROOF_WALK_Y + 0.42;
 
-    /* ─── Ladder climb (W/S); Space also climbs up like Minecraft ─── */
+    /* ─── Ladder climb ──────────────────────────────────────────────────────
+       Space (or W) climbs UP, S climbs DOWN. With no input the technician
+       slides down the ladder at a slow controlled rate — this is how the
+       roof-hatch descent feels natural after walking onto the open hatch
+       (the player would otherwise be holding W "forward" and shoot back up
+       through the hatch). The auto-pop-out at the top only triggers while
+       the player is actively climbing, so descents never bounce.
+    ─────────────────────────────────────────────────────────────────────── */
     if (inShaft) {
       yVelRef.current = 0;
       let climb = 0;
-      if (fwd || k[' '] || k['spacebar']) climb += CLIMB_SPEED;
-      if (bk) climb -= CLIMB_SPEED;
+      const climbUp = !!(k[' '] || k['spacebar'] || fwd);
+      const climbDown = !!bk;
+      if (climbUp && !climbDown) climb = CLIMB_SPEED;
+      else if (climbDown && !climbUp) climb = -CLIMB_SPEED;
+      else climb = -CLIMB_SPEED * 0.45; /* idle = controlled slide-down */
       y += climb * delta;
       y = THREE.MathUtils.clamp(y, MAIN_FLOOR_Y, ROOF_WALK_Y + 0.01);
 
-      if (y >= ROOF_WALK_Y - 0.06) {
+      if (climb > 0 && y >= ROOF_WALK_Y - 0.06) {
         posRef.current.set(LADDER_ROOF_EXIT[0], LADDER_ROOF_EXIT[1], LADDER_ROOF_EXIT[2]);
         onRoofRef.current = true;
         yVelRef.current = 0;
@@ -281,7 +291,10 @@ export function TechnicianController({
     }
 
     const onRoof = onRoofRef.current;
-    const xBound = onRoof ? ROOF_MOVEMENT_BOUND : ROOM_BOUND;
+    /* On the roof, the parapet limits walkable area. On the ground floor,
+       the building walls are now solid AABBs so the bound just keeps the
+       player inside the surrounding lawn (yard). */
+    const xBound = onRoof ? ROOF_MOVEMENT_BOUND : OUTDOOR_BOUND;
 
     /* Jump before integration so lift-off velocity applies this same frame. */
     const jumpHeld = !!(k[' '] || k['spacebar']);

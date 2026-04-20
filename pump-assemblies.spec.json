@@ -1,0 +1,94 @@
+{
+    "task": "You are an expert HVAC piping designer and React Three Fiber developer. Focus exclusively on designing and implementing the two pumps and their exact pipe connections in the engine room for the YORK water-cooled chiller 3D simulation. Build detailed, performant 3D components for the Condenser Water Pump (CDWP) and Chilled Water Pump (CHWP) with correct suction and discharge piping sequences, valves, strainers, and instrumentation. Use procedural geometry with @react-three/drei for best performance on Mac M1 Pro.",
+  
+    "pump_design_requirements": {
+      "general": {
+        "style": "Realistic industrial end-suction centrifugal pumps, floor-mounted on concrete base with vibration isolators",
+        "material": "Metallic gray pump body with dark motor housing",
+        "vfd": "Wall-mounted VFD cabinet next to each pump, gray enclosure with yellow 'VFD' label"
+      },
+      "cdwp_condenser_water_pump": {
+        "name": "CDWP – Condenser Water Pump",
+        "location": "Engine room, positioned near the right side (condenser end) of the YORK chiller",
+        "suction_connection": {
+          "source": "Vertical CWS riser descending from rooftop cooling tower basin",
+          "sequence": [
+            "Vertical CWS riser (Dark Green pipe) enters engine room from ceiling",
+            "Isolation gate valve (Dark Green body)",
+            "Y-strainer (basket strainer with drain valve)",
+            "Eccentric reducer if needed (flat side up)",
+            "Short straight horizontal pipe run (minimum 6–8 pipe diameters for good flow)",
+            "Connects directly to CDWP suction inlet flange"
+          ]
+        },
+        "discharge_connection": {
+          "destination": "YORK chiller condenser water inlet (right side of chiller)",
+          "sequence": [
+            "CDWP discharge flange",
+            "Check valve (swing type, Dark Green)",
+            "Isolation gate valve (Dark Green)",
+            "Optional inline flow transmitter (FT)",
+            "Temperature and pressure test ports",
+            "Connects horizontally or with short elbow into chiller condenser inlet"
+          ]
+        },
+        "pipe_color": "Dark Green for CWS side"
+      },
+  
+      "chwp_chilled_water_pump": {
+        "name": "CHWP – Chilled Water Pump",
+        "location": "Engine room, positioned near the left side (evaporator end) of the YORK chiller",
+        "suction_connection": {
+          "source": "Vertical CHR riser descending from rooftop AHU/RTU",
+          "sequence": [
+            "Vertical CHR riser (Light Blue pipe) enters engine room from ceiling",
+            "Isolation gate valve (Light Blue body)",
+            "Y-strainer (basket strainer with drain valve)",
+            "Short straight horizontal pipe run (minimum 6–8 pipe diameters)",
+            "Connects directly to CHWP suction inlet flange"
+          ]
+        },
+        "discharge_connection": {
+          "destination": "Vertical CHS riser going up to rooftop AHU/RTU cooling coil",
+          "sequence": [
+            "CHWP discharge flange",
+            "Check valve (swing type, Dark Blue)",
+            "Isolation gate valve (Dark Blue)",
+            "Optional inline flow transmitter (FT)",
+            "Temperature and pressure test ports",
+            "Connects to vertical CHS riser (Dark Blue) heading upward through roof penetration"
+          ]
+        },
+        "pipe_color": {
+          "suction": "Light Blue (CHR)",
+          "discharge": "Dark Blue (CHS)"
+        }
+      }
+    },
+  
+    "visual_and_technical_requirements": {
+      "modeling": "Use procedural geometry: Cylinder for pump body and motor, Box for base, Tube or custom geometry for piping. Keep total polygons low (< 15k per pump assembly).",
+      "valves": "Gate valves shown with clear handle. Check valves with visible flapper or swing symbol. Y-strainers with removable basket detail and bottom drain.",
+      "instruments": "Add local pressure gauges (PG) and temperature gauges (TG) on suction and discharge sides of both pumps. Include differential pressure indicator (PDI) across each pump.",
+      "labels": "Clear text labels: 'CDWP', 'CHWP', pipe labels 'CWS', 'CHR', 'CHS', flow direction arrows.",
+      "animation": "Subtle pump impeller rotation when running (visible through transparent section or via cutaway). VFD status light.",
+      "interactivity": "Make pumps, valves, and instruments clickable with tooltips showing component name, tag, and function."
+    },
+  
+    "performance_guidelines": {
+      "target": "Optimized for Mac M1 Pro browser – maintain 60 fps. Use instancing where possible. Avoid heavy imported GLB models for pumps and piping.",
+      "color_standard": "Follow 2026 ASHRAE/HVAC conventions: Dark Blue = CHS, Light Blue = CHR, Dark Green = CWS, Light Green = CWR"
+    },
+  
+    "output_expectations": {
+      "deliverables": [
+        "Two separate reusable React Three Fiber components: `<CDWPPumpAssembly />` and `<CHWPPumpAssembly />`",
+        "Each component must include: pump model, full suction piping sequence, full discharge piping sequence, valves, strainers, instruments, and proper pipe colors",
+        "Clear code comments explaining the connection sequence for CDWP and CHWP",
+        "Integration example showing how to place both assemblies relative to the chiller in the engine room scene"
+      ],
+      "verification": "Explicitly confirm that the suction and discharge connections for both CDWP and CHWP follow the exact sequences defined in 'pump_design_requirements'. Show flow path from rooftop → pump → chiller (for CDWP) and from AHU → pump → AHU (for CHWP)."
+    },
+  
+    "notes": "This prompt is focused only on pump design and pipe connections in the engine room. The rest of the system (chiller body, rooftop equipment, electrical) will be handled separately. Prioritize clarity, technical accuracy, and performance."
+  }

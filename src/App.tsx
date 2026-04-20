@@ -1,8 +1,8 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Suspense, useState, useRef, useEffect, useLayoutEffect, type MutableRefObject } from 'react';
-import { useGLTF, Text, OrbitControls, PointerLockControls, Html } from '@react-three/drei';
+import { useGLTF, Text, OrbitControls, PointerLockControls, Html, Sky, Cloud, Clouds } from '@react-three/drei';
 import * as THREE from 'three';
-import { Scene, CHILLER_ORBIT_TARGET, DEFAULT_SIM_CAMERA_POSITION } from './components/canvas/Scene';
+import { Scene, CHILLER_ORBIT_TARGET, DEFAULT_SIM_CAMERA_POSITION, SUN_POSITION } from './components/canvas/Scene';
 import { InspectRaycaster } from './components/canvas/InspectRaycaster';
 import { TechnicianController } from './components/canvas/TechnicianController';
 import { CxAlloyWidget, CxAlloyHtmlMaximized } from './components/ui/CxAlloyPanel';
@@ -27,7 +27,11 @@ import {
   FLANGE_OUTSET,
 } from './components/canvas/PipingAccessories';
 import { Vfd, VfdWiring } from './components/canvas/Vfd';
+import { PidPlantSystems } from './components/canvas/PidPlantSystems';
+import { EndSuctionHvacPump } from './components/canvas/IndustrialCentrifugalPump';
 import { useSimulationStore } from './store/useSimulationStore';
+import { useGarageDoorStore } from './store/useGarageDoorStore';
+import { useChillerColorStore } from './store/useChillerColorStore';
 import { simulationEngine } from './simulation/SimulationEngine';
 
 /**
@@ -846,6 +850,17 @@ function RooftopAHU({ position }: { position: [number, number, number] }) {
       >
         CHILLED WATER COOLING COIL
       </Text>
+      {/* Auto air vents at coil header high points (pid air_management) */}
+      <AirVent
+        position={[COIL_X - 0.9, H / 2 - 0.35, D / 2 + 0.22]}
+        rotation={[0, Math.PI / 2, 0]}
+        pipeRadius={0.12}
+      />
+      <AirVent
+        position={[COIL_X + 0.9, H / 2 - 0.55, -D / 2 - 0.22]}
+        rotation={[0, -Math.PI / 2, 0]}
+        pipeRadius={0.12}
+      />
 
       {/* ─── FAN SECTION — twin centrifugal blowers behind screened access ─── */}
       {[FAN_X - 0.75, FAN_X + 0.75].map((dx, di) => (
@@ -1162,6 +1177,596 @@ function RooftopAHU({ position }: { position: [number, number, number] }) {
   );
 }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   ENGINE-ROOM ROLL-UP GARAGE DOOR
+   Industrial sectional overhead door on the +Z (south) face. Each door has
+   side guide rails, a header housing, and a horizontally-ribbed curtain
+   that retracts upward into the housing when "open". The curtain Y is
+   smoothly lerped each frame toward the target driven by useGarageDoorStore.
+
+   `centerX` / `z` place the door on the south wall plane, `width`/`height`
+   size the bay. Depth (Z thickness) of the curtain is intentionally thin so
+   it sits flush with the wall.
+   ───────────────────────────────────────────────────────────────────────── */
+function GarageDoor({
+  centerX,
+  z,
+  width,
+  height,
+  tag,
+}: {
+  centerX: number;
+  z: number;
+  width: number;
+  height: number;
+  tag: string;
+}) {
+  const open = useGarageDoorStore((s) => s.open);
+  const progressRef = useRef(0);
+
+  /* ─── Sectional-door geometry ──────────────────────────────────────────
+     The curtain is N rigid horizontal panels. Each panel travels along a
+     fixed S-curve "track" that runs straight up the wall, bends 90° just
+     above the header on a curve of radius `TRACK_R`, then runs horizontally
+     back along the ceiling toward −Z (into the engine room). At any frame
+     each panel's position/rotation is derived from a single track-distance
+     parameter `s` so the panels stay rigidly chained together as the door
+     opens and closes. */
+  // Real industrial sectional doors have panel sections about 0.5–0.8 m tall
+  // so each panel can navigate the corner radius without binding. For a 11 m
+  // door, 14 panels gives ~0.79 m sections — typical of high-lift commercial
+  // overhead doors. The bend radius is sized so PANEL_H < ARC_LEN, which
+  // keeps the chord-vs-arc deviation small while transitioning the corner.
+  const N_PANELS    = 14;
+  const PANEL_H     = height / N_PANELS;     // ~0.79 m per section
+  const PANEL_THICK = 0.07;
+  const TRACK_R     = 0.70;                  // bend radius at the header
+  const ARC_LEN     = TRACK_R * Math.PI / 2; // ≈1.10 m of curved track
+  // Total lift needed to put the entire chain on the horizontal ceiling run:
+  // bottom-of-bottom-panel must reach the start of the horizontal section.
+  const L_MAX       = height + ARC_LEN;
+  const VISION_IDX  = N_PANELS - 2;          // second-from-top section
+
+  // Track parametrization: returns (y, z) at arc-distance `s` from the floor.
+  // Vertical run → quarter-circle bend → horizontal ceiling run.
+  const trackPoint = (s: number): [number, number] => {
+    if (s <= height) return [s, 0];
+    if (s <= height + ARC_LEN) {
+      const theta = (s - height) / TRACK_R;
+      return [
+        height + TRACK_R * Math.sin(theta),
+        -TRACK_R * (1 - Math.cos(theta)),
+      ];
+    }
+    return [height + TRACK_R, -TRACK_R - (s - height - ARC_LEN)];
+  };
+
+  const panelRefs = useRef<Array<THREE.Group | null>>([]);
+
+  useFrame((_, dt) => {
+    const target = open ? 1 : 0;
+    const cur = progressRef.current;
+    // Critically-damped exponential smoothing toward target (~1.5 s travel).
+    const k = 1 - Math.exp(-dt * 2.2);
+    const next = cur + (target - cur) * k;
+    progressRef.current = Math.abs(next - target) < 0.0005 ? target : next;
+    const L = progressRef.current * L_MAX;
+    for (let i = 0; i < N_PANELS; i++) {
+      const g = panelRefs.current[i];
+      if (!g) continue;
+      // Each panel is a rigid plate hinged at its top and bottom edges. The
+      // hinge points slide along the track at constant arc-length spacing
+      // PANEL_H apart. We position the panel as the chord between those two
+      // endpoints — this guarantees adjacent panels share their hinge point
+      // at every frame, so the chain reads as one continuous garage door.
+      const [y0, z0] = trackPoint(i * PANEL_H + L);
+      const [y1, z1] = trackPoint((i + 1) * PANEL_H + L);
+      g.position.set(0, (y0 + y1) / 2, (z0 + z1) / 2);
+      // Rotation around X so panel's local +Y axis aligns with the chord
+      // (vertical when closed; rotates through −π/2 as the panel transitions
+      // from vertical wall to horizontal ceiling track).
+      g.rotation.x = Math.atan2(z1 - z0, y1 - y0);
+    }
+  });
+
+  // ─── Material palette ─────────────────────────────────────────────────
+  const panelColor   = '#c8c2b5';   // ivory steel skin
+  const trimColor    = '#7a7670';   // mid-tone gray-brown trim
+  const railColor    = '#3a3a38';   // dark powder-coated steel
+  const railLip      = '#9a9a96';   // brushed inner guide face
+  const hingeColor   = '#222220';   // black hinge backplates
+  const motorColor   = '#2a2a2a';   // operator housing
+  const motorAccent  = '#cc4422';   // safety-red E-stop
+  const springColor  = '#4a4a48';   // raw-steel torsion spring
+  const shaftColor   = '#5a5a58';   // chromed torsion shaft
+
+  /* ─── One sectional panel ─────────────────────────────────────────────
+     Renders the slab + outside embossing + inside stiffeners + hinges.
+     The vision section (i === VISION_IDX) builds itself from a frame of
+     strips so the panes can be transparent on BOTH faces. */
+  const renderPanel = (i: number) => {
+    const isVision = i === VISION_IDX;
+    const isBottom = i === 0;
+    const isTop    = i === N_PANELS - 1;
+
+    // Outside embossed-cell pattern: a 6-wide row of slightly raised
+    // rectangles per panel — the classic "raised panel" garage-door look.
+    // 14 panels × 6 cells gives a clean rectangular grid that reads as a
+    // sectional overhead door from any sensible viewing distance.
+    const embossCols    = 6;
+    const embossMargX   = 0.20;
+    const embossMargY   = 0.10;
+    const cellGap       = 0.10;
+    const cellW         = (width - 2 * embossMargX - (embossCols - 1) * cellGap) / embossCols;
+    const cellH         = PANEL_H - 2 * embossMargY;
+
+    // Vision-row layout (only used when isVision)
+    const sideStripW = 0.40;
+    const winSlots   = 8;
+    const mullionW   = 0.06;
+    const visionW    = width - 2 * sideStripW;
+    const winW       = (visionW - (winSlots - 1) * mullionW) / winSlots;
+    const stride     = winW + mullionW;
+    const winH       = PANEL_H * 0.62;
+
+    return (
+      <group
+        key={`panel-${i}`}
+        ref={(el) => { panelRefs.current[i] = el; }}
+        position={[0, (i + 0.5) * PANEL_H, 0]}
+      >
+        {!isVision && (
+          <>
+            {/* Main panel slab (solid section) */}
+            <mesh castShadow receiveShadow>
+              <boxGeometry args={[width, PANEL_H, PANEL_THICK]} />
+              <meshStandardMaterial color={panelColor} roughness={0.78} metalness={0.18} />
+            </mesh>
+            {/* OUTSIDE: embossed raised-panel cells */}
+            {Array.from({ length: embossCols }, (_, c) => {
+              const cx = -width / 2 + embossMargX + cellW / 2 + c * (cellW + cellGap);
+              return (
+                <mesh
+                  key={`emb-${c}`}
+                  position={[cx, 0, PANEL_THICK / 2 + 0.012]}
+                  castShadow
+                >
+                  <boxGeometry args={[cellW, cellH, 0.024]} />
+                  <meshStandardMaterial color={panelColor} roughness={0.78} metalness={0.18} />
+                </mesh>
+              );
+            })}
+          </>
+        )}
+
+        {isVision && (
+          <>
+            {/* Top horizontal stile */}
+            <mesh
+              position={[0, PANEL_H / 2 - (PANEL_H * 0.19) / 2, 0]}
+              castShadow
+              receiveShadow
+            >
+              <boxGeometry args={[width, PANEL_H * 0.19, PANEL_THICK]} />
+              <meshStandardMaterial color={panelColor} roughness={0.78} metalness={0.18} />
+            </mesh>
+            {/* Bottom horizontal stile */}
+            <mesh
+              position={[0, -PANEL_H / 2 + (PANEL_H * 0.19) / 2, 0]}
+              castShadow
+              receiveShadow
+            >
+              <boxGeometry args={[width, PANEL_H * 0.19, PANEL_THICK]} />
+              <meshStandardMaterial color={panelColor} roughness={0.78} metalness={0.18} />
+            </mesh>
+            {/* Left side stile */}
+            <mesh position={[-width / 2 + sideStripW / 2, 0, 0]} castShadow receiveShadow>
+              <boxGeometry args={[sideStripW, winH, PANEL_THICK]} />
+              <meshStandardMaterial color={panelColor} roughness={0.78} metalness={0.18} />
+            </mesh>
+            {/* Right side stile */}
+            <mesh position={[width / 2 - sideStripW / 2, 0, 0]} castShadow receiveShadow>
+              <boxGeometry args={[sideStripW, winH, PANEL_THICK]} />
+              <meshStandardMaterial color={panelColor} roughness={0.78} metalness={0.18} />
+            </mesh>
+            {/* Vertical mullions between window panes */}
+            {Array.from({ length: winSlots - 1 }, (_, m) => {
+              const mx = -width / 2 + sideStripW + winW + mullionW / 2 + m * stride;
+              return (
+                <mesh key={`mull-${m}`} position={[mx, 0, 0]} castShadow>
+                  <boxGeometry args={[mullionW, winH, PANEL_THICK]} />
+                  <meshStandardMaterial color={panelColor} roughness={0.78} metalness={0.18} />
+                </mesh>
+              );
+            })}
+            {/* Window panes — transparent both faces, framed both faces */}
+            {Array.from({ length: winSlots }, (_, w) => {
+              const wx = -width / 2 + sideStripW + winW / 2 + w * stride;
+              return (
+                <group key={`win-${w}`} position={[wx, 0, 0]}>
+                  {/* Glazing */}
+                  <mesh>
+                    <boxGeometry args={[winW, winH, PANEL_THICK * 0.65]} />
+                    <meshStandardMaterial
+                      color="#3b556a"
+                      roughness={0.16}
+                      metalness={0.5}
+                      emissive="#1a2a35"
+                      emissiveIntensity={0.45}
+                      transparent
+                      opacity={0.42}
+                    />
+                  </mesh>
+                  {/* Outside frame bezel */}
+                  <mesh position={[0, 0, PANEL_THICK / 2 + 0.006]}>
+                    <boxGeometry args={[winW + 0.05, winH + 0.05, 0.014]} />
+                    <meshStandardMaterial color={trimColor} roughness={0.5} metalness={0.55} />
+                  </mesh>
+                  <mesh position={[0, 0, PANEL_THICK / 2 + 0.014]}>
+                    <boxGeometry args={[winW - 0.04, winH - 0.04, 0.006]} />
+                    <meshStandardMaterial
+                      color="#7e95a8"
+                      roughness={0.18}
+                      metalness={0.6}
+                      transparent
+                      opacity={0.30}
+                    />
+                  </mesh>
+                  {/* Inside frame bezel */}
+                  <mesh position={[0, 0, -PANEL_THICK / 2 - 0.006]}>
+                    <boxGeometry args={[winW + 0.05, winH + 0.05, 0.014]} />
+                    <meshStandardMaterial color={trimColor} roughness={0.5} metalness={0.55} />
+                  </mesh>
+                </group>
+              );
+            })}
+          </>
+        )}
+
+        {/* INSIDE (−Z): horizontal stiffener strut at panel mid-height.
+            Visible from inside the engine room when the door is closed. */}
+        {!isVision && (
+          <mesh
+            position={[0, 0, -PANEL_THICK / 2 - 0.04]}
+            castShadow
+          >
+            <boxGeometry args={[width - 0.40, 0.06, 0.06]} />
+            <meshStandardMaterial color={trimColor} roughness={0.6} metalness={0.5} />
+          </mesh>
+        )}
+
+        {/* INSIDE: hinges along the TOP edge of every panel except the
+            topmost — these connect this panel to the section above and are
+            the most-recognizable "garage door" cue from inside. */}
+        {!isTop && (
+          <>
+            {[-width / 4, 0, width / 4].map((hx, hi) => (
+              <group
+                key={`hinge-${hi}`}
+                position={[hx, PANEL_H / 2, -PANEL_THICK / 2 - 0.025]}
+              >
+                <mesh castShadow>
+                  <boxGeometry args={[0.40, 0.18, 0.04]} />
+                  <meshStandardMaterial color={hingeColor} roughness={0.5} metalness={0.7} />
+                </mesh>
+                {/* Knuckle pin (cylinder along X) */}
+                <mesh rotation={[0, 0, Math.PI / 2]} position={[0, 0, -0.030]} castShadow>
+                  <cylinderGeometry args={[0.040, 0.040, 0.42, 10]} />
+                  <meshStandardMaterial color="#5e5e5a" roughness={0.4} metalness={0.85} />
+                </mesh>
+              </group>
+            ))}
+            {/* End-stile hinges with track rollers — outboard of the door
+                edges, riding inside the side rails. */}
+            {[-1, 1].map((sx) => (
+              <group
+                key={`endhinge-${sx}`}
+                position={[sx * (width / 2 - 0.10), PANEL_H / 2, -PANEL_THICK / 2 - 0.035]}
+              >
+                <mesh castShadow>
+                  <boxGeometry args={[0.28, 0.20, 0.06]} />
+                  <meshStandardMaterial color={hingeColor} roughness={0.5} metalness={0.7} />
+                </mesh>
+                {/* Roller stem extending outward beyond door edge into the rail */}
+                <mesh
+                  position={[sx * 0.22, 0, 0]}
+                  rotation={[0, 0, Math.PI / 2]}
+                  castShadow
+                >
+                  <cylinderGeometry args={[0.025, 0.025, 0.34, 8]} />
+                  <meshStandardMaterial color={railLip} roughness={0.4} metalness={0.85} />
+                </mesh>
+                {/* Roller wheel at end of stem (rides in the rail) */}
+                <mesh
+                  position={[sx * 0.40, 0, 0]}
+                  rotation={[0, 0, Math.PI / 2]}
+                  castShadow
+                >
+                  <cylinderGeometry args={[0.075, 0.075, 0.045, 14]} />
+                  <meshStandardMaterial color="#1a1a1a" roughness={0.55} metalness={0.35} />
+                </mesh>
+              </group>
+            ))}
+          </>
+        )}
+
+        {/* BOTTOM PANEL extras: outside lift bar + grab handles + astragal seal */}
+        {isBottom && (
+          <group position={[0, -PANEL_H / 2, 0]}>
+            {/* Outside push bar (full-width) */}
+            <mesh position={[0, 0.30, PANEL_THICK / 2 + 0.06]} castShadow>
+              <boxGeometry args={[width * 0.55, 0.10, 0.05]} />
+              <meshStandardMaterial color="#2a2a28" roughness={0.5} metalness={0.7} />
+            </mesh>
+            {/* Push-bar mounting brackets */}
+            {[-0.6 * width / 2 + 0.5, 0.6 * width / 2 - 0.5].map((bx, bi) => (
+              <mesh
+                key={`brkt-${bi}`}
+                position={[bx, 0.30, PANEL_THICK / 2 + 0.025]}
+                castShadow
+              >
+                <boxGeometry args={[0.12, 0.20, 0.10]} />
+                <meshStandardMaterial color={trimColor} roughness={0.55} metalness={0.55} />
+              </mesh>
+            ))}
+            {/* Grab handles for manual operation */}
+            {[-0.7, 0.7].map((hx, hi) => (
+              <mesh
+                key={`out-handle-${hi}`}
+                position={[hx, 0.30, PANEL_THICK / 2 + 0.18]}
+                castShadow
+              >
+                <torusGeometry args={[0.12, 0.020, 8, 16, Math.PI]} />
+                <meshStandardMaterial color="#1a1a1a" roughness={0.4} metalness={0.7} />
+              </mesh>
+            ))}
+            {/* Astragal — black rubber weather seal across the bottom edge */}
+            <mesh position={[0, 0.05, 0]}>
+              <boxGeometry args={[width - 0.04, 0.10, PANEL_THICK + 0.06]} />
+              <meshStandardMaterial color="#141414" roughness={0.95} metalness={0.0} />
+            </mesh>
+            {/* Bottom inside lift handle (visible from inside when closed) */}
+            <mesh position={[0, 0.30, -PANEL_THICK / 2 - 0.06]} castShadow>
+              <boxGeometry args={[width * 0.55, 0.10, 0.05]} />
+              <meshStandardMaterial color="#2a2a28" roughness={0.5} metalness={0.7} />
+            </mesh>
+          </group>
+        )}
+      </group>
+    );
+  };
+
+  // ─── STATIC: side guide rails (vertical run + curved bend + ceiling run) ───
+  const renderTrackRail = (sx: -1 | 1) => {
+    const segments = 14;
+    const horizLen = height + 0.6;
+    return (
+      <group key={`rail-${sx}`} position={[sx * (width / 2 + 0.18), 0, 0]}>
+        {/* Vertical rail (full door height) */}
+        <mesh position={[0, height / 2, 0]} castShadow>
+          <boxGeometry args={[0.10, height, 0.22]} />
+          <meshStandardMaterial color={railColor} roughness={0.55} metalness={0.75} />
+        </mesh>
+        {/* Inner guide lip (lighter face the rollers ride against) */}
+        <mesh position={[-sx * 0.06, height / 2, 0]}>
+          <boxGeometry args={[0.025, height, 0.16]} />
+          <meshStandardMaterial color={railLip} roughness={0.40} metalness={0.85} />
+        </mesh>
+        {/* Curved bend — quarter circle at the header */}
+        {Array.from({ length: segments }, (_, k) => {
+          const tm = ((k + 0.5) / segments) * (Math.PI / 2);
+          const py = height + TRACK_R * Math.sin(tm);
+          const pz = -TRACK_R * (1 - Math.cos(tm));
+          const segLen = ARC_LEN / segments + 0.005;
+          return (
+            <mesh
+              key={`bend-${k}`}
+              position={[0, py, pz]}
+              rotation={[-tm, 0, 0]}
+              castShadow
+            >
+              <boxGeometry args={[0.10, segLen, 0.22]} />
+              <meshStandardMaterial color={railColor} roughness={0.55} metalness={0.75} />
+            </mesh>
+          );
+        })}
+        {/* Horizontal ceiling rail — receives the panels when door is open */}
+        <mesh
+          position={[0, height + TRACK_R, -TRACK_R - horizLen / 2]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          castShadow
+        >
+          <boxGeometry args={[0.10, horizLen, 0.22]} />
+          <meshStandardMaterial color={railColor} roughness={0.55} metalness={0.75} />
+        </mesh>
+        {/* Two ceiling drop-rod hangers supporting the horizontal rail.
+            Short (≈0.20 m) so they tuck under the rooftop deck (y ≈ 11.86)
+            without punching through. */}
+        {[0.30, 0.70].map((f, hi) => (
+          <mesh
+            key={`hang-${hi}`}
+            position={[0, height + TRACK_R + 0.12, -TRACK_R - horizLen * f]}
+            castShadow
+          >
+            <boxGeometry args={[0.05, 0.22, 0.05]} />
+            <meshStandardMaterial color={railColor} roughness={0.55} metalness={0.75} />
+          </mesh>
+        ))}
+      </group>
+    );
+  };
+
+  return (
+    <group position={[centerX, 0, z]} name={`garage-door:${tag}`}>
+      {/* Side guide rails (static — vertical + bend + ceiling run) */}
+      {renderTrackRail(-1)}
+      {renderTrackRail(1)}
+
+      {/* TORSION SPRING ASSEMBLY — long shaft along the inside header with
+          two large helical springs flanking a center anchor plate, and a
+          cable drum at each end. Stationary; purely visual. Sits just above
+          the swept volume of the panels (y = height + R ≈ 11.7) and slightly
+          inside the wall plane so it reads clearly from inside the engine
+          room. Stays clear of the rooftop deck above (deck underside ≈ 11.86). */}
+      <group position={[0, height + TRACK_R + 0.12, -0.30]}>
+        {/* Shaft (thin steel tube spanning slightly past the door width) */}
+        <mesh rotation={[0, 0, Math.PI / 2]} castShadow>
+          <cylinderGeometry args={[0.05, 0.05, width + 0.6, 12]} />
+          <meshStandardMaterial color={shaftColor} roughness={0.4} metalness={0.85} />
+        </mesh>
+        {/* Cable drums at each end */}
+        {[-1, 1].map((sx) => (
+          <mesh
+            key={`drum-${sx}`}
+            position={[sx * (width / 2 + 0.05), 0, 0]}
+            rotation={[0, 0, Math.PI / 2]}
+            castShadow
+          >
+            <cylinderGeometry args={[0.16, 0.16, 0.16, 16]} />
+            <meshStandardMaterial color="#1a1a1a" roughness={0.5} metalness={0.7} />
+          </mesh>
+        ))}
+        {/* Center anchor plate */}
+        <mesh castShadow>
+          <boxGeometry args={[0.42, 0.34, 0.20]} />
+          <meshStandardMaterial color={hingeColor} roughness={0.5} metalness={0.7} />
+        </mesh>
+        {/* Two helical torsion springs flanking the center plate */}
+        {[-1, 1].map((sx) => {
+          const springLen = width * 0.32;
+          const coilCount = 18;
+          return (
+            <group
+              key={`spring-${sx}`}
+              position={[sx * (springLen / 2 + 0.30), 0, 0]}
+            >
+              {/* Spring tube (open cylinder body so the coils show through) */}
+              <mesh rotation={[0, 0, Math.PI / 2]} castShadow>
+                <cylinderGeometry args={[0.13, 0.13, springLen, 16, 1, true]} />
+                <meshStandardMaterial
+                  color={springColor}
+                  roughness={0.55}
+                  metalness={0.7}
+                  side={THREE.DoubleSide}
+                />
+              </mesh>
+              {/* Helical coils suggested with thin rings stepped along X */}
+              {Array.from({ length: coilCount }, (_, c) => {
+                const cx = -springLen / 2 + (c + 0.5) * (springLen / coilCount);
+                return (
+                  <mesh
+                    key={`coil-${c}`}
+                    position={[cx, 0, 0]}
+                    rotation={[0, Math.PI / 2, 0]}
+                  >
+                    <torusGeometry args={[0.13, 0.014, 6, 18]} />
+                    <meshStandardMaterial color="#2a2a28" roughness={0.6} metalness={0.6} />
+                  </mesh>
+                );
+              })}
+              {/* End cone at outboard end (winding cone) */}
+              <mesh
+                position={[sx * (springLen / 2 + 0.04), 0, 0]}
+                rotation={[0, 0, Math.PI / 2]}
+              >
+                <cylinderGeometry args={[0.10, 0.14, 0.10, 14]} />
+                <meshStandardMaterial color={hingeColor} roughness={0.5} metalness={0.7} />
+              </mesh>
+            </group>
+          );
+        })}
+      </group>
+
+      {/* JACKSHAFT OPERATOR (commercial side-mount door operator) — bolted
+          to the inside wall just above the right rail. Drives the torsion
+          shaft via a chain housing. Visible from inside the engine room. */}
+      <group position={[width / 2 + 0.55, height + 0.30, -0.55]}>
+        {/* Operator housing */}
+        <mesh castShadow>
+          <boxGeometry args={[0.55, 0.50, 0.55]} />
+          <meshStandardMaterial color={motorColor} roughness={0.6} metalness={0.55} />
+        </mesh>
+        {/* Brushed faceplate / model badge */}
+        <mesh position={[0, 0.05, 0.281]}>
+          <boxGeometry args={[0.42, 0.20, 0.006]} />
+          <meshStandardMaterial color="#3a3a3a" roughness={0.5} metalness={0.6} />
+        </mesh>
+        {/* Status indicator LED */}
+        <mesh position={[0.16, 0.16, 0.288]}>
+          <cylinderGeometry args={[0.018, 0.018, 0.012, 12]} />
+          <meshStandardMaterial
+            color="#88ff88"
+            emissive="#44ff44"
+            emissiveIntensity={1.4}
+          />
+        </mesh>
+        {/* Red E-stop pushbutton */}
+        <mesh position={[-0.16, -0.14, 0.288]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.05, 0.05, 0.05, 16]} />
+          <meshStandardMaterial color={motorAccent} roughness={0.5} metalness={0.3} />
+        </mesh>
+        {/* Mushroom cap of E-stop */}
+        <mesh position={[-0.16, -0.14, 0.318]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.07, 0.07, 0.018, 16]} />
+          <meshStandardMaterial color={motorAccent} roughness={0.45} metalness={0.3} />
+        </mesh>
+        {/* Drive sprocket on top of operator (couples to vertical drive chain) */}
+        <mesh position={[-0.18, 0.30, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+          <cylinderGeometry args={[0.07, 0.07, 0.04, 16]} />
+          <meshStandardMaterial color="#5e5e5a" roughness={0.4} metalness={0.85} />
+        </mesh>
+        {/* Vertical drive chain — climbs from operator top up to the
+            torsion shaft sprocket sitting directly above */}
+        <mesh position={[-0.18, 0.55, 0.02]}>
+          <boxGeometry args={[0.025, 0.55, 0.025]} />
+          <meshStandardMaterial color="#1a1a1a" roughness={0.55} metalness={0.7} />
+        </mesh>
+        <mesh position={[-0.18, 0.55, -0.02]}>
+          <boxGeometry args={[0.025, 0.55, 0.025]} />
+          <meshStandardMaterial color="#1a1a1a" roughness={0.55} metalness={0.7} />
+        </mesh>
+        {/* Sprocket on the torsion shaft (above the operator) */}
+        <mesh position={[-0.18, 0.86, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+          <cylinderGeometry args={[0.09, 0.09, 0.05, 18]} />
+          <meshStandardMaterial color="#5e5e5a" roughness={0.4} metalness={0.85} />
+        </mesh>
+        {/* Manual emergency-release chain hoist drop (red guide pulley + chain) */}
+        <mesh position={[0.30, -0.05, 0.10]} castShadow>
+          <torusGeometry args={[0.06, 0.012, 6, 16]} />
+          <meshStandardMaterial color={motorAccent} roughness={0.5} metalness={0.5} />
+        </mesh>
+        <mesh position={[0.30, -0.90, 0.10]}>
+          <cylinderGeometry args={[0.005, 0.005, 1.7, 6]} />
+          <meshStandardMaterial color="#5a5a58" roughness={0.5} metalness={0.85} />
+        </mesh>
+      </group>
+
+      {/* DOOR TAG PLATE — stays put on the outside of the right rail */}
+      <group
+        position={[width / 2 + 0.55, 1.6, 0.12]}
+        rotation={[0, -Math.PI / 8, 0]}
+      >
+        <mesh castShadow>
+          <boxGeometry args={[0.42, 0.20, 0.02]} />
+          <meshStandardMaterial color="#1a1a1a" roughness={0.6} metalness={0.4} />
+        </mesh>
+        <Text
+          position={[0, 0, 0.012]}
+          fontSize={0.10}
+          color="#f4f4f0"
+          anchorX="center"
+          anchorY="middle"
+        >
+          {tag}
+        </Text>
+      </group>
+
+      {/* THE DOOR PANELS — animated along the S-curve track */}
+      {Array.from({ length: N_PANELS }, (_, i) => renderPanel(i))}
+    </group>
+  );
+}
+
 function EngineRoom({
   onHmiZoom,
   hmiLookAtRef,
@@ -1178,6 +1783,14 @@ function EngineRoom({
   vfdZoomed: boolean;
 }) {
   const compressorRunning = useSimulationStore((s) => s.state.compressorRunning);
+  const condenserWaterFlowing = useSimulationStore((s) => s.state.condenserWaterFlowing);
+  const evaporatorWaterFlowing = useSimulationStore((s) => s.state.evaporatorWaterFlowing);
+  /* Live shell tints sampled by ChillerModel from the baked GLB textures.
+     Subscribed here (not inside the barrel-head IIFE) so EngineRoom re-renders
+     once when the colours resolve, after which the procedural weld-necks
+     read as continuous with the YORK barrel skin. */
+  const evapShellColor = useChillerColorStore((s) => s.evaporatorShellColor);
+  const condShellColor = useChillerColorStore((s) => s.condenserShellColor);
   const vfdScreenAnchorRef = useRef<THREE.Group>(null);
   useFrame(() => {
     const g = vfdScreenAnchorRef.current;
@@ -1185,7 +1798,7 @@ function EngineRoom({
   });
   /* ─── Chiller_R2.glb shell geometry (verified via scripts/inspect-chiller.mjs) ───
      Two horizontal heat-exchanger shells run along Z, capped by flat head plates
-     (Plane_Baked / Plane001_Baked) whose outer face sits at z ≈ ±4.65.
+     (Plane_Baked / Plane001_Baked) whose outer face sits at z ≈ ±4.575.
 
      LOWER shell — condenser side (CDW circuit)
        Cylinder_Baked / Cylinder002_Baked / Cylinder009_Baked
@@ -1196,40 +1809,80 @@ function EngineRoom({
        Cylinder001_Baked / Cylinder003_Baked / Cylinder010_Baked
        center=(-2.092, 1.218), outer R≈0.895, top y≈2.113
        modelled water nozzle Cylinder018_Baked at (-1.984, 2.304, -3.531). */
-  const HEAD_Z = 4.65;            // outer face of dished head end-plate
+  const HEAD_Z = 4.575;           // outer face of evaporator dished head end-plate (matches Plane001_Baked, −Z side)
+  /* Evaporator barrel −Z end face (Cylinder003_Baked): Z∈[−4.759, +4.759].
+     Bolt CHW flanges onto this face (z=−4.759) just as CDW flanges bolt
+     onto the condenser barrel +Z face — closing any gap between the spool
+     and the visible barrel cap. */
+  const EVAP_HEAD_Z = 4.759;      // outer −Z face of evaporator barrel (CHW flange seat)
+  /* Condenser barrel +Z end face (Cylinder002_Baked.001) sits 0.185 m
+     proud of the modelled head plate at z=4.575. Bolt the CDW flanges
+     onto THIS face so they kiss the actual visible barrel cap instead
+     of leaving a daylight gap between the spool and the shell. Verified
+     by mesh probe: world-space face hit ≈ (−0.20, 0.87, +4.7588),
+     normal +Z, on Cylinder.002_Baked.001 (lower / condenser shell). */
+  const COND_HEAD_Z = 4.76;       // outer +Z face of condenser barrel (CDW flange seat)
 
   // Evaporator (upper) shell — chilled water side
-  const EVAP_X        = -2.092;   // shell axis X
-  const EVAP_NOZZLE_Y =  2.30;    // matches modelled Cylinder018_Baked
+  const EVAP_X        = -2.092;   // shell axis X (Cylinder001/003/010_Baked center)
+  const EVAP_NOZZLE_X = -1.984;   // marine waterbox face center X (Cylinder018_Baked)
+  void EVAP_X;                    // documentation alias (real nozzle is offset toward chiller axis)
+  void HEAD_Z;                    // kept for CHW_Z_SUPPLY/RETURN derivation below
 
   // Condenser (lower) shell — condenser water side
-  const COND_NOZZLE_X =  0.335;   // matches modelled Cylinder017_Baked
-  const COND_NOZZLE_Y =  2.05;    // matches modelled Cylinder017_Baked
+  /* YORK YK convention: 2-pass marine waterbox with the inlet (CWS) and
+     outlet (CWR) flanges VERTICALLY STACKED on the head-face centerline
+     of the barrel. The cool entering water (denser) feeds the lower
+     pass first, so the inlet is the LOWER nozzle; the warmed exit
+     water leaves through the UPPER nozzle. Both nozzles are bolted
+     onto the +Z barrel face (Cylinder002_Baked.001 at COND_HEAD_Z).
+     The legacy modelled Cylinder017_Baked at (0.335, 2.042, 3.657)
+     is a top-of-shell tap (vent/relief), NOT the waterbox connection. */
+  const COND_NOZZLE_X     =  0.0;    // centerline of barrel face (per YORK YK marine waterbox)
+  const COND_NOZZLE_Y_INL =  0.30;   // LOWER nozzle — CWS inlet (cool entering water)
+  const COND_NOZZLE_Y_OUT =  1.30;   // UPPER nozzle — CWR outlet (warmed leaving water)
 
   /* ─── Piping geometry constants ────────────────────────────────────────
-     Pipe centerlines are spaced so 0.44m insulated jackets never intersect
-     (centerline spacing ≥ 0.90m). Horizontal mains run overhead at code-
-     compliant headroom (>2.4m / 8ft AFF; here ~9m / 30ft for clearance over
-     the chiller, walkways, and pumps). All elbows are short-radius (1.0 D). */
-  /** 24" Sch.40 main — single outer radius for straights, elbows (torus tube), and fittings. */
-  const MAIN_PIPE_RADIUS = 0.30;
-  const MAIN_PIPE_INS_RADIUS = MAIN_PIPE_RADIUS + 0.10; // closed-cell jacket over bare pipe
-  // CHW (chilled water) — both stubs leave the −Z evaporator head, run parallel
-  // toward −Z to the riser tops, then turn UP to the overhead main, run along
-  // −X to the side wall, and drop to the wall penetration.
-  const CHW_X_SUPPLY    = EVAP_X - 0.45;     // -2.542 (left nozzle on −Z head)
-  const CHW_X_RETURN    = EVAP_X + 0.45;     // -1.642 (right nozzle on −Z head)
-  const CHW_Z_SUPPLY    = -(HEAD_Z + 0.95);  // -5.60 (riser Z — clear of head)
-  const CHW_Z_RETURN    = -(HEAD_Z + 2.10);  // -6.75 (1.15m apart, no overlap)
-  const CHW_Y_FLANGE    = EVAP_NOZZLE_Y;     // 2.30 — head nozzle centerline
+     For the modelled barrel sizes (~2.17 m OD condenser, ~1.79 m OD
+     evaporator → ≈1500-ton class YORK YK), the realistic main-pipe size
+     is 17–18″ Sch.40 carbon steel (D ≈ 0.44 m). Earlier 24″ pipe was
+     visually oversized relative to the barrels. Horizontal mains run
+     overhead at code-compliant headroom (>2.4m / 8ft AFF; here ~9m for
+     clearance over the chiller, walkways, and pumps). All elbows are
+     long-radius (centerline R = 1.5 D). */
+  /** 17–18" Sch.40 main — single outer radius for straights, elbows (torus tube), and fittings. */
+  const MAIN_PIPE_RADIUS = 0.22;
+  const MAIN_PIPE_INS_RADIUS = MAIN_PIPE_RADIUS + 0.07; // ~7 cm closed-cell jacket per ASHRAE 90.1
+  // CHW (chilled water) — YORK YK 2-pass marine waterbox convention:
+  //   Both nozzles at the same X (barrel-face nozzle centerline, EVAP_NOZZLE_X = -1.984),
+  //   stacked vertically (SUP lower, RET upper) on the −Z barrel face.
+  //   Their risers run to different Z positions so elbows sweep in separate
+  //   Z planes — no X offset needed, and both nozzles land on the barrel face.
+  //   Evaporator barrel X∈[-2.987, -1.197]; EVAP_NOZZLE_X=-1.984 is well inside.
+  const CHW_X_SUPPLY    = EVAP_NOZZLE_X;    // -1.984 — on the barrel face
+  const CHW_X_RETURN    = EVAP_NOZZLE_X;    // -1.984 — same X; risers diverge in Z, not X
+  const CHW_Z_SUPPLY    = -(HEAD_Z + 0.95);        // -5.525 (riser Z — clear of barrel face)
+  const CHW_Z_RETURN    = -(HEAD_Z + 2.10);        // -6.675 (1.15 m apart, no overlap)
+  const CHW_Y_FLG_SUP   = 1.00;                    // LOWER nozzle — CHWS inlet (cold entering water)
+  const CHW_Y_FLG_RET   = 1.80;                    // UPPER nozzle — CHWR outlet (warmed leaving water)
 
-  // CDW (condenser water) — both stubs leave the +Z condenser head, run parallel
-  // toward +Z, turn UP, pass through roof penetrations, run on roof to tower.
-  const CW_X_SUPPLY     =  COND_NOZZLE_X;    // +0.335 (snaps to modelled nozzle)
-  const CW_X_RETURN     = -COND_NOZZLE_X;    // -0.335 (mirrored — return nozzle)
-  const CW_Z_SUPPLY     =  +(HEAD_Z + 0.95); // +5.60 (riser Z — clear of head)
-  const CW_Z_RETURN     =  +(HEAD_Z + 2.10); // +6.75
-  const CW_Y_FLANGE     =  COND_NOZZLE_Y;    // 2.05 — head nozzle centerline
+  // CDW (condenser water) — both nozzles bolt onto the +Z condenser barrel face.
+  // Supply is at the barrel centerline (X=0). Return is offset +0.55 m in X
+  // so its spool, elbow, and riser don't intersect the supply riser.
+  const CW_X_SUPPLY     =  COND_NOZZLE_X;         // 0.0 — barrel-face centerline
+  /* Return nozzle is offset +0.55 m in X so its lateral spool and elbow
+     arc run clear of the supply riser that rises straight up at X=0.
+     Both flanges still bolt onto the same +Z barrel face (COND_HEAD_Z). */
+  const CW_X_RETURN     =  COND_NOZZLE_X + 0.55;  // +0.55 — stepped aside to avoid supply riser
+  /* Riser Z is computed off the actual condenser barrel face (COND_HEAD_Z=4.76)
+     plus a generous lateral spool length so the rooftop / engine-room riser
+     centerlines land at exactly z=+5.60 (supply) and z=+6.75 (return) —
+     the same world coordinates assumed by PidPlantSystems.tsx (CW_ZS / CW_ZR)
+     and walkModeWorld.ts collision AABBs. */
+  const CW_Z_SUPPLY     =  COND_HEAD_Z + 0.84; // +5.60 (riser Z — clear of barrel face)
+  const CW_Z_RETURN     =  COND_HEAD_Z + 1.99; // +6.75
+  const CW_Y_FLG_SUP    =  COND_NOZZLE_Y_INL;  // 0.30 — lower nozzle CL (CWS inlet)
+  const CW_Y_FLG_RET    =  COND_NOZZLE_Y_OUT;  // 1.30 — upper nozzle CL (CWR outlet)
   const CW_Y_ROOF_TOP   = 12.55;             // horizontal main elevation on roof
   const CW_TOWER_X      =  25;               // cooling tower position X
   const CW_TOWER_Z      = (CW_Z_SUPPLY + CW_Z_RETURN) / 2;  // 6.175 — tower-curb Z
@@ -1243,9 +1896,11 @@ function EngineRoom({
   const CW_TOWER_FLG_Z_RET = CW_TOWER_Z + 0.575;      // = CW_Z_RETURN
   void CW_TOWER_FLG_Z_SUP; void CW_TOWER_FLG_Z_RET;   // documentation aliases
 
-  /* Z position where the lateral barrel-stub terminates (= head outer face). */
-  const CHW_STUB_Z_IN = -HEAD_Z;             // -4.65
-  const CW_STUB_Z_IN  =  HEAD_Z;             //  4.65
+  /* Z positions where lateral barrel-stubs terminate — both keyed to the
+     actual barrel end faces (not the legacy flat dished head plates) so
+     flanges kiss the visible barrel caps with no daylight gap. */
+  const CHW_STUB_Z_IN = -EVAP_HEAD_Z;        // -4.759 — evaporator barrel −Z end face
+  const CW_STUB_Z_IN  =  COND_HEAD_Z;        // +4.760 — condenser barrel +Z end face
 
   /* ─── ROOFTOP AIR-HANDLING UNIT (AHU-1) ───
      Built-up cabinet sized to load up the full 500-ton chiller. Centered
@@ -1266,18 +1921,127 @@ function EngineRoom({
 
   return (
     <group>
-      {/* ─── CONCRETE FLOOR SLAB ─── */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
-        <planeGeometry args={[120, 120]} />
+      {/* ─── OUTDOOR GRASS YARD ───
+          Large lawn plane that wraps the entire building. Sits 8 cm below
+          the indoor concrete slab top (y=0) so the slab's exposed edge
+          reads as a real curb above grade and the grass is fully tucked
+          under the slab box where they overlap (no z-fighting). */}
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, -0.08, 0]}
+        receiveShadow
+      >
+        <planeGeometry args={[420, 420, 1, 1]} />
+        <meshStandardMaterial
+          color="#5a7d3a"
+          roughness={0.96}
+          metalness={0.0}
+        />
+      </mesh>
+      {/* Subtle darker grass tiles for depth — slightly lower than the
+          main lawn so they never cause z-fight on the slab's footprint. */}
+      {[[-90, -90], [-90, 0], [-90, 90], [0, -90], [0, 90], [90, -90], [90, 0], [90, 90]].map(([x, z], i) => (
+        <mesh
+          key={`lawn-${i}`}
+          rotation={[-Math.PI / 2, 0, 0]}
+          position={[x, -0.079, z]}
+          receiveShadow
+        >
+          <planeGeometry args={[60, 60]} />
+          <meshStandardMaterial
+            color={i % 2 === 0 ? '#638a3f' : '#527033'}
+            roughness={0.97}
+            metalness={0.0}
+          />
+        </mesh>
+      ))}
+
+      {/* ─── CONCRETE INDOOR SLAB (3D box, sized to building footprint + curb)
+          Top surface sits exactly at y=0 so every existing equipment piece,
+          column, valve, drain, etc. that was placed at y=0 still rests on
+          the floor. Slab is 0.20 m thick, with the bottom face at y=-0.20
+          (well below grade so the grass plane at y=-0.08 is hidden inside
+          the slab volume and never z-fights the top surface). */}
+      <mesh position={[0, -0.10, 0]} receiveShadow castShadow>
+        <boxGeometry args={[70.5, 0.20, 70.5]} />
         <meshStandardMaterial color="#9a958e" roughness={0.97} metalness={0.01} />
       </mesh>
 
-      {/* Slab section marks */}
-      {[[-30, -30], [-30, 0], [-30, 30], [0, -30], [0, 0], [0, 30], [30, -30], [30, 0], [30, 30]].map(([x, z], i) => (
-        <mesh key={`slab-${i}`} rotation={[-Math.PI / 2, 0, 0]} position={[x, -0.03, z]}>
-          <planeGeometry args={[59.9, 59.9]} />
+      {/* Quartered concrete pour joints — thin painted bands sitting just
+          above the slab top to avoid z-fighting (slab top is y=0). */}
+      {[[-17.5, -17.5], [-17.5, 17.5], [17.5, -17.5], [17.5, 17.5]].map(([x, z], i) => (
+        <mesh key={`slab-${i}`} rotation={[-Math.PI / 2, 0, 0]} position={[x, 0.005, z]}>
+          <planeGeometry args={[34.5, 34.5]} />
           <meshStandardMaterial color="#8c8780" roughness={0.98} metalness={0.01} />
         </mesh>
+      ))}
+
+      {/* Concrete entrance pad — extends out the open south face onto the lawn.
+          Sits at the slab top (y=0) and continues out past the building edge. */}
+      <mesh position={[0, -0.04, 41]} receiveShadow castShadow>
+        <boxGeometry args={[16, 0.12, 12]} />
+        <meshStandardMaterial color="#a39e96" roughness={0.94} metalness={0.02} />
+      </mesh>
+      {/* Threshold strip at the building edge (sits on top of the slab) */}
+      <mesh position={[0, 0.07, 35.05]} castShadow receiveShadow>
+        <boxGeometry args={[16.2, 0.14, 0.45]} />
+        <meshStandardMaterial color="#7a766f" roughness={0.9} metalness={0.05} />
+      </mesh>
+
+      {/* A few decorative bushes flanking the entrance (low cost, big mood) */}
+      {([
+        [-9, 0, 41],
+        [9, 0, 41],
+        [-12, 0, 47],
+        [12, 0, 47],
+        [-26, 0, 22],
+        [26, 0, 22],
+        [-30, 0, -15],
+        [30, 0, -15],
+      ] as const).map(([bx, by, bz], i) => (
+        <group key={`bush-${i}`} position={[bx, by, bz]}>
+          <mesh position={[0, 0.55, 0]} castShadow>
+            <sphereGeometry args={[0.85, 12, 8]} />
+            <meshStandardMaterial color="#3e6b2c" roughness={0.95} />
+          </mesh>
+          <mesh position={[0.55, 0.42, 0.2]} castShadow>
+            <sphereGeometry args={[0.55, 10, 7]} />
+            <meshStandardMaterial color="#4a7a32" roughness={0.95} />
+          </mesh>
+          <mesh position={[-0.45, 0.5, -0.3]} castShadow>
+            <sphereGeometry args={[0.6, 10, 7]} />
+            <meshStandardMaterial color="#3a6028" roughness={0.95} />
+          </mesh>
+        </group>
+      ))}
+
+      {/* A few simple trees in the corners of the yard */}
+      {([
+        [-55, 0, -50],
+        [55, 0, -50],
+        [-65, 0, 35],
+        [65, 0, 35],
+        [-45, 0, 60],
+        [45, 0, 60],
+      ] as const).map(([tx, ty, tz], i) => (
+        <group key={`tree-${i}`} position={[tx, ty, tz]}>
+          <mesh position={[0, 1.6, 0]} castShadow>
+            <cylinderGeometry args={[0.32, 0.42, 3.2, 8]} />
+            <meshStandardMaterial color="#5a3a22" roughness={0.95} />
+          </mesh>
+          <mesh position={[0, 4.2, 0]} castShadow>
+            <sphereGeometry args={[2.2, 14, 10]} />
+            <meshStandardMaterial color="#3a6028" roughness={0.95} />
+          </mesh>
+          <mesh position={[1.0, 4.6, 0.6]} castShadow>
+            <sphereGeometry args={[1.4, 12, 8]} />
+            <meshStandardMaterial color="#4a7a32" roughness={0.95} />
+          </mesh>
+          <mesh position={[-0.9, 4.0, -0.5]} castShadow>
+            <sphereGeometry args={[1.5, 12, 8]} />
+            <meshStandardMaterial color="#2f4f24" roughness={0.95} />
+          </mesh>
+        </group>
       ))}
 
       {/* ─── CEILING BEAMS ─── */}
@@ -1294,9 +2058,13 @@ function EngineRoom({
         </mesh>
       ))}
 
-      {/* ─── HANGING LIGHT FIXTURES ─── */}
+      {/* ─── HANGING LIGHT FIXTURES ───
+          The southernmost row sits at z=22 (not the building edge at z=30)
+          so the rolled-up garage-door panels — which stack along the ceiling
+          between world z≈23 and z≈34 when the doors are open — don't pierce
+          through the pendants and lamp housings. */}
       {[-20, -10, 0, 10, 20].map((x, xi) =>
-        [-30, -15, 0, 15, 30].map((z, zi) => (
+        [-30, -15, 0, 15, 22].map((z, zi) => (
           <group key={`light-${xi}-${zi}`} position={[x, 11.5, z]}>
             <mesh>
               <cylinderGeometry args={[0.03, 0.03, 0.8, 6]} />
@@ -1330,6 +2098,74 @@ function EngineRoom({
         <boxGeometry args={[80, 12, 0.5]} />
         <meshStandardMaterial color="#7a7570" roughness={0.95} metalness={0.05} />
       </mesh>
+
+      {/* ─── SOUTH FACE: garage-door bays (3 roll-up doors + masonry piers) ───
+          The +Z face used to be a single open opening. It now has three
+          industrial roll-up overhead doors flanked by short masonry piers
+          and a continuous header beam at the top. Doors animate via
+          <GarageDoor/> driven by useGarageDoorStore.
+
+          South wall layout (x = −35 .. +35, total span 70 m):
+            wall 1m | door 20m | pier 1.5m | door 20m | pier 1.5m | door 20m | wall 6m
+          For visual symmetry of the door bays, the three door centers are
+          at x = −24, 0, +24, each door 20 m wide. */}
+      {(() => {
+        const Z   = 35;
+        const WT  = 0.5;
+        const WALL_H = 12;
+        const DOOR_W = 20;
+        const DOOR_H = 11;            // bottom of header beam at y=11
+        const HEADER_H = WALL_H - DOOR_H;  // 1.0 m header housing band
+        const wallMatProps = { color: '#7a7570', roughness: 0.95, metalness: 0.05 } as const;
+        const doorXs = [-24, 0, 24];
+        // Pier (masonry) bays between/outside the doors
+        const pierBays: Array<[number, number]> = [
+          [-35, -24 - DOOR_W / 2],          // left outer wall (x=-35 .. -34)
+          [-24 + DOOR_W / 2, -DOOR_W / 2],  // pier between door1 & door2 (-14..-10)
+          [DOOR_W / 2, 24 - DOOR_W / 2],    // pier between door2 & door3 (10..14)
+          [24 + DOOR_W / 2, 35],            // right outer wall (34..35)
+        ];
+        return (
+          <group name="south-face">
+            {/* Masonry piers between doors — full height */}
+            {pierBays.map(([x0, x1], i) => {
+              const w = x1 - x0;
+              if (w <= 0.001) return null;
+              return (
+                <mesh
+                  key={`south-pier-${i}`}
+                  position={[(x0 + x1) / 2, WALL_H / 2, Z]}
+                  castShadow
+                  receiveShadow
+                >
+                  <boxGeometry args={[w, WALL_H, WT]} />
+                  <meshStandardMaterial {...wallMatProps} />
+                </mesh>
+              );
+            })}
+            {/* Continuous painted header lintel above all three doors —
+                kept thin in Z so the torsion-spring assembly inside each
+                door bay (mounted just behind the wall plane) reads from
+                inside the engine room rather than being hidden inside a
+                deep beam volume. */}
+            <mesh position={[0, DOOR_H + HEADER_H / 2, Z]} castShadow receiveShadow>
+              <boxGeometry args={[doorXs.length * DOOR_W + 3.0, HEADER_H, WT * 0.55]} />
+              <meshStandardMaterial color="#5a5854" roughness={0.7} metalness={0.35} />
+            </mesh>
+            {/* Three garage doors */}
+            {doorXs.map((dx, di) => (
+              <GarageDoor
+                key={`gdoor-${di}`}
+                centerX={dx}
+                z={Z}
+                width={DOOR_W}
+                height={DOOR_H}
+                tag={`OHD-${di + 1}`}
+              />
+            ))}
+          </group>
+        );
+      })()}
 
       {/* ─── ROOF ACCESS: fixed ladder + open roof hatch (walkModeWorld LADDER volume) ─── */}
       {(() => {
@@ -1512,65 +2348,52 @@ function EngineRoom({
         </group>
       ))}
 
-      {/* ─── SUPPORT COLUMNS ─── */}
+      {/* ─── SUPPORT COLUMNS ───
+          Steel W-shape columns rest on the concrete slab (top at y=0) and
+          run all the way up to the ceiling beams at y=12. Previous code
+          centered the boxes at y=0 which buried half of every column
+          below grade and left a 6 m air-gap between the column tops and
+          the ceiling beams. */}
       {[[-25, -25], [-25, 25], [25, -25], [25, 25]].map(([x, z], i) => (
         <group key={`col-${i}`} position={[x, 0, z]}>
-          <mesh castShadow receiveShadow>
-            <boxGeometry args={[0.8, 12, 0.8]} />
+          {/* Column shaft — bottom at y=0.04 (above base plate), top at y=12.0 */}
+          <mesh position={[0, (12.0 - 0.04) / 2 + 0.04, 0]} castShadow receiveShadow>
+            <boxGeometry args={[0.8, 12.0 - 0.04, 0.8]} />
             <meshStandardMaterial color="#6a6a68" roughness={0.7} metalness={0.5} />
           </mesh>
-          {/* Column base plate */}
-          <mesh position={[0, -0.1, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-            <boxGeometry args={[1.2, 1.2, 0.1]} />
+          {/* Bolted base plate sitting on top of the slab */}
+          <mesh position={[0, 0.02, 0]} castShadow receiveShadow>
+            <boxGeometry args={[1.2, 0.04, 1.2]} />
             <meshStandardMaterial color="#4a4a48" roughness={0.7} metalness={0.6} />
           </mesh>
-          {/* Column cap */}
-          <mesh position={[0, 6.1, 0]}>
-            <boxGeometry args={[0.9, 0.2, 0.9]} />
+          {/* Column cap plate at the underside of the ceiling beam */}
+          <mesh position={[0, 12.05, 0]} castShadow receiveShadow>
+            <boxGeometry args={[0.9, 0.10, 0.9]} />
             <meshStandardMaterial color="#555" roughness={0.5} metalness={0.7} />
           </mesh>
         </group>
       ))}
 
-      {/* ─── WATER PUMPS ─── */}
-      {/* Pump 1 — left front */}
-      <group position={[-22, 0, -22]}>
-        <mesh castShadow receiveShadow>
-          <cylinderGeometry args={[1.0, 1.0, 2.5, 20]} />
-          <meshStandardMaterial color="#5a5a58" roughness={0.5} metalness={0.8} />
-        </mesh>
-        <mesh position={[0, 1.6, 0]} castShadow>
-          <cylinderGeometry args={[0.7, 0.7, 1.6, 16]} />
-          <meshStandardMaterial color="#4a6a4a" roughness={0.6} metalness={0.3} />
-        </mesh>
-        <mesh position={[0, -0.7, 0]}>
-          <boxGeometry args={[2.2, 0.35, 2.2]} />
-          <meshStandardMaterial color="#444" roughness={0.8} metalness={0.2} />
-        </mesh>
-        <mesh position={[0, 3.0, 0]}>
-          <cylinderGeometry args={[0.5, 0.5, 0.7, 16]} />
-          <meshStandardMaterial color="#888" roughness={0.4} metalness={0.7} />
-        </mesh>
+      {/* ─── WATER PUMPS (stand-in secondary sets — main duty pumps at CDWP/CHWP skids) ─── */}
+      <group name="pump-standby-front" position={[-22, 0, -22]} rotation={[0, Math.PI * 0.22, 0]}>
+        <EndSuctionHvacPump
+          pipeRadius={0.22}
+          duty="cdw"
+          tag="P-BK1"
+          name="pump:standby-1"
+          running={condenserWaterFlowing}
+          paint="crimson"
+        />
       </group>
-
-      {/* Pump 2 — left rear */}
-      <group position={[-22, 0, 22]}>
-        <mesh castShadow receiveShadow>
-          <cylinderGeometry args={[0.9, 0.9, 2.2, 20]} />
-          <meshStandardMaterial color="#5a5a58" roughness={0.5} metalness={0.8} />
-        </mesh>
-        <mesh position={[0, 1.4, 0]} castShadow>
-          <cylinderGeometry args={[0.65, 0.65, 1.4, 16]} />
-          <meshStandardMaterial color="#4a6a4a" roughness={0.6} metalness={0.3} />
-        </mesh>
-        <mesh position={[0, -0.6, 0]}>
-          <boxGeometry args={[2.0, 0.3, 2.0]} />
-          <meshStandardMaterial color="#444" roughness={0.8} metalness={0.2} />
-        </mesh>
-        <mesh position={[0, 2.7, 0]}>
-          <cylinderGeometry args={[0.45, 0.45, 0.6, 16]} />
-          <meshStandardMaterial color="#888" roughness={0.4} metalness={0.7} />
-        </mesh>
+      <group name="pump-standby-rear" position={[-22, 0, 22]} rotation={[0, -Math.PI * 0.18, 0]}>
+        <EndSuctionHvacPump
+          pipeRadius={0.2}
+          duty="chw"
+          tag="P-BK2"
+          name="pump:standby-2"
+          running={evaporatorWaterFlowing}
+          paint="crimson"
+        />
       </group>
 
       {/* ─── WATER TANKS ─── */}
@@ -1597,30 +2420,7 @@ function EngineRoom({
         ))}
       </group>
 
-      {/* Horizontal bladder tank — right front */}
-      <group position={[22, 0, 22]}>
-        <mesh castShadow receiveShadow rotation={[0, Math.PI/2, 0]}>
-          <cylinderGeometry args={[1.1, 1.1, 3.5, 20]} />
-          <meshStandardMaterial color="#6a6a68" roughness={0.5} metalness={0.6} />
-        </mesh>
-        <mesh position={[0, 0, 2.1]} rotation={[0, Math.PI/2, 0]}>
-          <cylinderGeometry args={[1.15, 1.15, 0.1, 20]} />
-          <meshStandardMaterial color="#888" roughness={0.4} metalness={0.7} />
-        </mesh>
-        <mesh position={[0, 0, -2.1]} rotation={[0, Math.PI/2, 0]}>
-          <cylinderGeometry args={[1.15, 1.15, 0.1, 20]} />
-          <meshStandardMaterial color="#888" roughness={0.4} metalness={0.7} />
-        </mesh>
-        {/* Saddle supports */}
-        <mesh position={[0, -1.4, 0.8]}>
-          <boxGeometry args={[0.3, 2.0, 0.3]} />
-          <meshStandardMaterial color="#555" roughness={0.6} metalness={0.6} />
-        </mesh>
-        <mesh position={[0, -1.4, -0.8]}>
-          <boxGeometry args={[0.3, 2.0, 0.3]} />
-          <meshStandardMaterial color="#555" roughness={0.6} metalness={0.6} />
-        </mesh>
-      </group>
+      {/* Bladder expansion tank — modeled in PidPlantSystems (CHR suction / CHWP). */}
 
       {/* ─── DUCTWORK ─── */}
       {/* Main supply duct */}
@@ -1812,14 +2612,16 @@ function EngineRoom({
         <meshStandardMaterial color="#555" roughness={0.7} metalness={0.5} />
       </mesh>
 
-      {/* ─── FLOOR DRAINS ─── */}
+      {/* ─── FLOOR DRAINS ───
+          Cast-iron drain frames sit on the slab top (y=0.004 / y=0.008 to
+          stay slightly proud of the concrete and avoid z-fighting). */}
       {[[-15, -15], [-15, 15], [15, -15], [15, 15]].map(([x, z], i) => (
         <group key={`drain-${i}`} position={[x, 0, z]}>
-          <mesh rotation={[-Math.PI/2, 0, 0]}>
+          <mesh rotation={[-Math.PI/2, 0, 0]} position={[0, 0.004, 0]}>
             <ringGeometry args={[0.25, 0.4, 12]} />
             <meshStandardMaterial color="#3a3a38" roughness={0.95} metalness={0.3} />
           </mesh>
-          <mesh rotation={[-Math.PI/2, 0, 0]} position={[0, 0.01, 0]}>
+          <mesh rotation={[-Math.PI/2, 0, 0]} position={[0, 0.008, 0]}>
             <circleGeometry args={[0.25, 12]} />
             <meshStandardMaterial color="#1a1a1a" roughness={0.9} />
           </mesh>
@@ -1858,10 +2660,11 @@ function EngineRoom({
         </mesh>
       ))}
 
-      {/* ─── CHILLER ANCHOR BOLTS ─── */}
+      {/* ─── CHILLER ANCHOR BOLTS ───
+          Embedded plate + raised washer/nut on the slab top. */}
       {[[-2.5, -3], [-2.5, 3], [2.5, -3], [2.5, 3]].map(([x, z], i) => (
         <group key={`bolt-${i}`} position={[x, 0, z]}>
-          <mesh rotation={[-Math.PI/2, 0, 0]}>
+          <mesh rotation={[-Math.PI/2, 0, 0]} position={[0, 0.004, 0]}>
             <circleGeometry args={[0.12, 8]} />
             <meshStandardMaterial color="#1a1a1a" roughness={0.9} />
           </mesh>
@@ -1927,52 +2730,52 @@ function EngineRoom({
       ═══════════════════════════════════════════════ */}
       {(() => {
         const HEADER_Y    = 1.10;                         // low-level header centerline
-        const CHW_ELBOW_R = 0.35;                         // long-radius barrel-head elbow
-        // The barrel-head elbow's lower tangent (riser-side) sits at
-        // CHW_Y_FLANGE − R = 1.95. The drop riser must come up to this Y
-        // and slip a few cm INTO the elbow body so the joint visually reads
-        // as a continuous welded ell — no daylight at the seam.
-        const ELBOW_TAN_Y = CHW_Y_FLANGE - CHW_ELBOW_R;   // 1.95 — exact tangent
-        const ELBOW_OUT_Y = ELBOW_TAN_Y + 0.04;           // 1.99 — small overlap
-        const DROP_LEN    = ELBOW_OUT_Y - HEADER_Y;       // 0.89 m drop to header
-        const DROP_CTR_Y  = (ELBOW_OUT_Y + HEADER_Y) / 2;
+        const CHW_ELBOW_R = 0.30;                         // long-radius barrel-head elbow (≈1.4 D for 17″ pipe)
         const HEADER_LEN  = Math.abs(CHW_X_SUPPLY - AHU_X) + 1.0; // chiller riser → past AHU tee
         const HEADER_CTR_X = (CHW_X_SUPPLY + AHU_X) / 2 - 0.5;
         return (
           <group>
             {(
               [
-                ['sup', CHW_X_SUPPLY, CHW_Z_SUPPLY, '#1c5aa8', '#143f7a'] as const,
-                ['ret', CHW_X_RETURN, CHW_Z_RETURN, '#c9b68c', '#a89270'] as const,
+                ['sup', CHW_X_SUPPLY, CHW_Z_SUPPLY, CHW_Y_FLG_SUP, '#1c5aa8', '#143f7a'] as const,
+                ['ret', CHW_X_RETURN, CHW_Z_RETURN, CHW_Y_FLG_RET, '#7eb8d8', '#5a9ec4'] as const,
               ]
-            ).map(([key, xRiser, z, pipeC, insC]) => (
+            ).map(([key, xRiser, z, yFlg, pipeC, insC]) => {
+              // Per-nozzle elbow tangent: the elbow centre is at yFlg − R, and
+              // the riser-side tangent is at the same Y. Overlap 4 cm into
+              // elbow body for a clean welded appearance.
+              const elbowTanY = yFlg - CHW_ELBOW_R;
+              const elbowOutY = elbowTanY + 0.04;
+              const dropLen   = elbowOutY - HEADER_Y;
+              const dropCtrY  = (elbowOutY + HEADER_Y) / 2;
+              return (
               <group key={`chw-leg-${key}`}>
                 {/* Short vertical drop from barrel-head elbow to header */}
-                <mesh position={[xRiser, DROP_CTR_Y, z]}>
-                  <cylinderGeometry args={[MAIN_PIPE_RADIUS, MAIN_PIPE_RADIUS, DROP_LEN, 16]} />
+                <mesh position={[xRiser, dropCtrY, z]}>
+                  <cylinderGeometry args={[MAIN_PIPE_RADIUS, MAIN_PIPE_RADIUS, dropLen, 16]} />
                   <meshStandardMaterial color={pipeC} roughness={0.6} metalness={0.4} />
                 </mesh>
-                <mesh position={[xRiser, DROP_CTR_Y, z]}>
-                  <cylinderGeometry args={[MAIN_PIPE_INS_RADIUS, MAIN_PIPE_INS_RADIUS, Math.max(DROP_LEN - 0.18, 0.05), 14]} />
+                <mesh position={[xRiser, dropCtrY, z]}>
+                  <cylinderGeometry args={[MAIN_PIPE_INS_RADIUS, MAIN_PIPE_INS_RADIUS, Math.max(dropLen - 0.18, 0.05), 14]} />
                   <meshStandardMaterial color={insC} roughness={0.9} metalness={0.0} transparent opacity={0.92} />
                 </mesh>
                 {/* Welded tee at the chiller end of the header (vertical drop ↔ horizontal main) */}
                 <mesh position={[xRiser, HEADER_Y, z]} rotation={[0, 0, Math.PI / 2]}>
-                  <cylinderGeometry args={[0.42, 0.42, 0.7, 16]} />
+                  <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.40, MAIN_PIPE_RADIUS * 1.40, 0.55, 16]} />
                   <meshStandardMaterial color={pipeC} roughness={0.5} metalness={0.5} />
                 </mesh>
                 {/* Companion flange pair at the tee (welded-neck flanges, ANSI 150) */}
-                {[-0.36, +0.36].map((dx, fi) => (
+                {[-MAIN_PIPE_RADIUS * 1.30, +MAIN_PIPE_RADIUS * 1.30].map((dx, fi) => (
                   <mesh
                     key={`chw-tee-flg-${key}-${fi}`}
                     position={[xRiser + dx, HEADER_Y, z]}
                     rotation={[0, 0, Math.PI / 2]}
                   >
-                    <cylinderGeometry args={[0.46, 0.46, 0.06, 16]} />
+                    <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.55, MAIN_PIPE_RADIUS * 1.55, 0.06, 16]} />
                     <meshStandardMaterial color="#8a8580" roughness={0.45} metalness={0.85} />
                   </mesh>
                 ))}
-                {/* Horizontal header — 24" Sch.40 carbon steel */}
+                {/* Horizontal header — 17" Sch.40 carbon steel (ASHRAE 90.1 + ARI 590) */}
                 <mesh position={[HEADER_CTR_X, HEADER_Y, z]} rotation={[0, 0, Math.PI / 2]}>
                   <cylinderGeometry args={[MAIN_PIPE_RADIUS, MAIN_PIPE_RADIUS, HEADER_LEN, 16]} />
                   <meshStandardMaterial color={pipeC} roughness={0.6} metalness={0.4} />
@@ -2000,7 +2803,8 @@ function EngineRoom({
                   </group>
                 ))}
               </group>
-            ))}
+              );
+            })}
 
             {/* Inline OS&Y gate valves at chiller side of each header (~3 m from tee) */}
             <GateValve
@@ -2015,7 +2819,7 @@ function EngineRoom({
               position={[CHW_X_RETURN - 3.0, HEADER_Y, CHW_Z_RETURN]}
               pipeRadius={MAIN_PIPE_RADIUS}
               outerRadius={MAIN_PIPE_INS_RADIUS}
-              bodyColor="#a89270"
+              bodyColor="#5a9ec4"
             />
 
             {/* Inline OS&Y gate valves at AHU side of each header
@@ -2032,7 +2836,7 @@ function EngineRoom({
               position={[AHU_TEE_X + 1.5, HEADER_Y, CHW_Z_RETURN]}
               pipeRadius={MAIN_PIPE_RADIUS}
               outerRadius={MAIN_PIPE_INS_RADIUS}
-              bodyColor="#a89270"
+              bodyColor="#5a9ec4"
             />
           </group>
         );
@@ -2174,24 +2978,25 @@ function EngineRoom({
       ═══════════════════════════════════════════════ */}
       {(
         [
-          ['sup', CW_X_SUPPLY, CW_Z_SUPPLY, '#1d7a3a', '#0e5a22', 'CONDENSER WATER SUPPLY', 'CWS', -1, CW_TOWER_FLG_Y_SUP] as const,
-          ['ret', CW_X_RETURN, CW_Z_RETURN, '#7ec07a', '#3e7a3a', 'CONDENSER WATER RETURN', 'CWR', +1, CW_TOWER_FLG_Y_RET] as const,
+          ['sup', CW_X_SUPPLY, CW_Z_SUPPLY, CW_Y_FLG_SUP, '#1d7a3a', '#0e5a22', 'CONDENSER WATER SUPPLY', 'CWS', -1, CW_TOWER_FLG_Y_SUP] as const,
+          ['ret', CW_X_RETURN, CW_Z_RETURN, CW_Y_FLG_RET, '#7ec07a', '#3e7a3a', 'CONDENSER WATER RETURN', 'CWR', +1, CW_TOWER_FLG_Y_RET] as const,
         ]
-      ).map(([key, xRiser, z, pipeC, lblC, fullName, shortName, flow, twrY]) => {
-        const R             = 0.45;                            // long-radius elbow on rooftop main
-        const CDW_BARREL_R  = 0.35;                            // barrel-head elbow centerline (matches barrel-head kit; > MAIN_PIPE_RADIUS)
+      ).map(([key, xRiser, z, yFlg, pipeC, lblC, fullName, shortName, flow, twrY]) => {
+        const R             = 0.40;                            // long-radius elbow on rooftop main (≈1.8 D)
+        const CDW_BARREL_R  = 0.30;                            // barrel-head elbow centerline (matches barrel-head kit; > MAIN_PIPE_RADIUS)
         const ROOF_LINE_Y   = 12.05;                           // top of rooftop deck
         const MAIN_Y        = CW_Y_ROOF_TOP;                   // 12.55 — horizontal main on roof
         // Engine-room riser TERMINATES exactly at the barrel-head elbow's
         // riser-side tangent. The barrel-head elbow centre sits at
-        // y = CW_Y_FLANGE − R (so the lateral spool, which is R above the
-        // centre, lands on CW_Y_FLANGE). The riser-side tangent point is
-        // at the same Y as the elbow centre, with the riser extending in
+        // y = yFlg − R (so the lateral spool, which is R above the
+        // centre, lands on yFlg). The riser-side tangent point is at
+        // the same Y as the elbow centre, with the riser extending in
         // +Y from there. A 4 cm overlap tucks the riser end inside the
         // elbow body for a clean welded appearance with no daylight at
-        // the seam — the previous −0.70 offset overshot the elbow by a
-        // full meter, leaving an orphan pipe stub hanging in the air.
-        const ENG_BOT_Y     = CW_Y_FLANGE - CDW_BARREL_R - 0.04; // 1.71
+        // the seam.
+        //   sup nozzle (yFlg=0.30): elbow CL @ y=0.0, riser starts at y=−0.04
+        //   ret nozzle (yFlg=1.30): elbow CL @ y=1.0, riser starts at y= 0.96
+        const ENG_BOT_Y     = yFlg - CDW_BARREL_R - 0.04;
         const ENG_TOP_Y     = MAIN_Y - R;                      // top of engine-room riser (below upper elbow)
         const ENG_LEN       = ENG_TOP_Y - ENG_BOT_Y;
         const ENG_CTR_Y     = (ENG_BOT_Y + ENG_TOP_Y) / 2;
@@ -2219,17 +3024,17 @@ function EngineRoom({
             </mesh>
             {/* Welded-neck flange just under the roof penetration (service / break point) */}
             <mesh position={[xRiser, ROOF_LINE_Y - 0.40, z]}>
-              <cylinderGeometry args={[0.46, 0.46, 0.06, 16]} />
+              <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.55, MAIN_PIPE_RADIUS * 1.55, 0.06, 16]} />
               <meshStandardMaterial color="#8a8580" roughness={0.45} metalness={0.85} />
             </mesh>
             {/* Roof penetration sleeve (galvanized) */}
             <mesh position={[xRiser, ROOF_LINE_Y, z]}>
-              <cylinderGeometry args={[0.42, 0.45, 0.45, 16]} />
+              <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.45, MAIN_PIPE_RADIUS * 1.55, 0.45, 16]} />
               <meshStandardMaterial color="#7c8086" roughness={0.55} metalness={0.55} />
             </mesh>
             {/* Roof flashing storm-collar */}
             <mesh position={[xRiser, ROOF_LINE_Y + 0.30, z]}>
-              <cylinderGeometry args={[0.55, 0.55, 0.04, 16]} />
+              <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.85, MAIN_PIPE_RADIUS * 1.85, 0.04, 16]} />
               <meshStandardMaterial color="#5a5854" roughness={0.85} metalness={0.15} />
             </mesh>
             {/* 90° elbow at top of engine-room riser (riser +Y → main +X) */}
@@ -2286,7 +3091,7 @@ function EngineRoom({
             </mesh>
             {/* Companion flange at tower connection */}
             <mesh position={[CW_TOWER_FLG_X + 0.05, TWR_TOP_Y, z]} rotation={[0, 0, Math.PI / 2]}>
-              <cylinderGeometry args={[0.46, 0.46, 0.06, 16]} />
+              <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.55, MAIN_PIPE_RADIUS * 1.55, 0.06, 16]} />
               <meshStandardMaterial color="#8a8580" roughness={0.45} metalness={0.85} />
             </mesh>
             {/* OS&Y gate valve in engine-room riser at maintenance height */}
@@ -2365,7 +3170,8 @@ function EngineRoom({
         [
           // [key, z (header line), entry-Y on AHU east face, pipeC, insC, lblC, label]
           ['sup', CHW_Z_SUPPLY, AHU_BASE_Y + 0.85, '#1c5aa8', '#143f7a', '#0d3f7a', 'CHWS'] as const,
-          ['ret', CHW_Z_RETURN, AHU_BASE_Y + 3.05, '#c9b68c', '#a89270', '#8a7a52', 'CHWR'] as const,
+          /* CHWR: light blue return per pid color_coding_standards_2026 */
+          ['ret', CHW_Z_RETURN, AHU_BASE_Y + 3.05, '#7eb8d8', '#5a9ec4', '#4a8ab8', 'CHWR'] as const,
         ]
       ).map(([key, z, entryY, pipeC, insC, lblC, txt]) => {
         const R             = 0.45;                          // long-radius elbow centerline
@@ -2387,17 +3193,17 @@ function EngineRoom({
           <group key={`chw-ahu-riser-${key}`}>
             {/* ── Tee body on the in-room horizontal header ── */}
             <mesh position={[AHU_TEE_X, HEADER_Y, z]}>
-              <cylinderGeometry args={[0.42, 0.42, 0.62, 16]} />
+              <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.40, MAIN_PIPE_RADIUS * 1.40, 0.50, 16]} />
               <meshStandardMaterial color={pipeC} roughness={0.5} metalness={0.5} />
             </mesh>
             {/* Companion flange pair at the tee */}
-            {[-0.36, +0.36].map((dx, fi) => (
+            {[-MAIN_PIPE_RADIUS * 1.30, +MAIN_PIPE_RADIUS * 1.30].map((dx, fi) => (
               <mesh
                 key={`chw-ahu-tee-flg-${key}-${fi}`}
                 position={[AHU_TEE_X + dx, HEADER_Y, z]}
                 rotation={[0, 0, Math.PI / 2]}
               >
-                <cylinderGeometry args={[0.46, 0.46, 0.06, 16]} />
+                <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.55, MAIN_PIPE_RADIUS * 1.55, 0.06, 16]} />
                 <meshStandardMaterial color="#8a8580" roughness={0.45} metalness={0.85} />
               </mesh>
             ))}
@@ -2412,9 +3218,15 @@ function EngineRoom({
               <cylinderGeometry args={[MAIN_PIPE_INS_RADIUS, MAIN_PIPE_INS_RADIUS, RISER_LEN - 0.55, 14]} />
               <meshStandardMaterial color={insC} roughness={0.9} metalness={0.0} transparent opacity={0.92} />
             </mesh>
+            {/* Automatic air vent — high point of vertical CHW riser (pid air_management) */}
+            <AirVent
+              position={[AHU_TEE_X, RISER_TOP_Y - 0.25, z]}
+              rotation={[0, 0, Math.PI / 2]}
+              pipeRadius={MAIN_PIPE_RADIUS}
+            />
             {/* Roof penetration sleeve (galvanized boot at rooftop deck) */}
             <mesh position={[AHU_TEE_X, 12.10, z]}>
-              <cylinderGeometry args={[0.50, 0.55, 0.36, 16]} />
+              <cylinderGeometry args={[MAIN_PIPE_INS_RADIUS + 0.04, MAIN_PIPE_INS_RADIUS + 0.10, 0.36, 16]} />
               <meshStandardMaterial color="#7c8086" roughness={0.55} metalness={0.55} />
             </mesh>
 
@@ -2451,7 +3263,7 @@ function EngineRoom({
               position={[AHU_EAST_X + 0.07, entryY, z]}
               rotation={[0, 0, Math.PI / 2]}
             >
-              <cylinderGeometry args={[0.46, 0.46, 0.06, 16]} />
+              <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.55, MAIN_PIPE_RADIUS * 1.55, 0.06, 16]} />
               <meshStandardMaterial color="#8a8580" roughness={0.45} metalness={0.85} />
             </mesh>
             {/* Boss / penetration ring on the cabinet skin */}
@@ -2459,7 +3271,7 @@ function EngineRoom({
               position={[AHU_EAST_X + 0.005, entryY, z]}
               rotation={[0, 0, Math.PI / 2]}
             >
-              <cylinderGeometry args={[0.50, 0.50, 0.04, 18]} />
+              <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.70, MAIN_PIPE_RADIUS * 1.70, 0.04, 18]} />
               <meshStandardMaterial color="#7c8086" roughness={0.5} metalness={0.6} />
             </mesh>
             {/* Bolt circle on the companion flange */}
@@ -2510,7 +3322,7 @@ function EngineRoom({
       {(
         [
           ['sup', CHW_Z_SUPPLY, '#0d3f7a', 'CHILLED WATER SUPPLY', 'CHWS', -1] as const,
-          ['ret', CHW_Z_RETURN, '#8a7a52', 'CHILLED WATER RETURN', 'CHWR', +1] as const,
+          ['ret', CHW_Z_RETURN, '#4a8ab8', 'CHILLED WATER RETURN', 'CHWR', +1] as const,
         ]
       ).map(([key, z, bg, full, short, flow]) => (
         <group key={`chw-id-${key}`}>
@@ -2696,15 +3508,17 @@ function EngineRoom({
         }
 
         // Bend centerline radii at the barrel-head 90° (must exceed MAIN_PIPE_RADIUS for torus mesh).
-        const CHW_R = 0.35;
-        const CDW_R = 0.35;
-        const chwSup = chain({ xRiser: CHW_X_SUPPLY, yFlange: CHW_Y_FLANGE,
+        // Matches CHW_ELBOW_R / CDW_BARREL_R in the riser blocks above so the
+        // riser-side tangent and the lateral-side tangent meet exactly.
+        const CHW_R = 0.30;
+        const CDW_R = 0.30;
+        const chwSup = chain({ xRiser: CHW_X_SUPPLY, yFlange: CHW_Y_FLG_SUP,
                                zHeadFace: CHW_STUB_Z_IN, zRiser: CHW_Z_SUPPLY, elbowR: CHW_R });
-        const chwRet = chain({ xRiser: CHW_X_RETURN, yFlange: CHW_Y_FLANGE,
+        const chwRet = chain({ xRiser: CHW_X_RETURN, yFlange: CHW_Y_FLG_RET,
                                zHeadFace: CHW_STUB_Z_IN, zRiser: CHW_Z_RETURN, elbowR: CHW_R });
-        const cdwSup = chain({ xRiser: CW_X_SUPPLY,  yFlange: CW_Y_FLANGE,
+        const cdwSup = chain({ xRiser: CW_X_SUPPLY,  yFlange: CW_Y_FLG_SUP,
                                zHeadFace: CW_STUB_Z_IN,  zRiser: CW_Z_SUPPLY,  elbowR: CDW_R });
-        const cdwRet = chain({ xRiser: CW_X_RETURN,  yFlange: CW_Y_FLANGE,
+        const cdwRet = chain({ xRiser: CW_X_RETURN,  yFlange: CW_Y_FLG_RET,
                                zHeadFace: CW_STUB_Z_IN,  zRiser: CW_Z_RETURN,  elbowR: CDW_R });
 
         // Render one nozzle's complete connection chain.
@@ -2719,7 +3533,7 @@ function EngineRoom({
         //    CDW arc 0→π/2 with rotation [0, −π/2, 0] sweeps from
         //      (z = elbowCtr + R) tangent +Y → (z = elbowCtr) tangent −Z
         function NozzleChain({
-          c, pipeColor, insColor, elbowR, boltCount, insulated,
+          c, pipeColor, insColor, elbowR, boltCount, insulated, vesselColor,
         }: {
           c: ReturnType<typeof chain>;
           pipeColor: string;
@@ -2727,6 +3541,10 @@ function EngineRoom({
           elbowR:    number;
           boltCount: number;
           insulated: boolean;
+          /** Colour of the chiller shell this nozzle is welded into — used
+           *  for the vessel-side weld-neck taper so it reads as part of the
+           *  beige barrel rather than a separately-painted spool stub. */
+          vesselColor: string;
         }) {
           const isCHW = c.zSign < 0;
           const flangeRotY = isCHW ? +Math.PI / 2 : -Math.PI / 2;
@@ -2742,6 +3560,7 @@ function EngineRoom({
                 rotation={[0, flangeRotY, 0]}
                 pipeRadius={MAIN_PIPE_RADIUS}
                 bodyColor={pipeColor}
+                vesselNeckColor={vesselColor}
                 boltCount={boltCount}
               />
               {/* ── Lateral spool: pipe-side flange end → elbow tangent ── */}
@@ -2772,85 +3591,29 @@ function EngineRoom({
             {/* ── CHW circuit → EVAPORATOR (upper) shell, −Z head ── */}
             <group>
               <NozzleChain c={chwSup} pipeColor="#1c5aa8" insColor="#143f7a"
-                           elbowR={CHW_R} boltCount={12} insulated />
-              <NozzleChain c={chwRet} pipeColor="#c9b68c" insColor="#a89270"
-                           elbowR={CHW_R} boltCount={12} insulated />
-              {/* Marine-waterbox cover plate / bonnet behind both flanges */}
-              <mesh
-                position={[
-                  (CHW_X_SUPPLY + CHW_X_RETURN) / 2,
-                  CHW_Y_FLANGE,
-                  CHW_STUB_Z_IN - 0.04,
-                ]}
-                rotation={[Math.PI / 2, 0, 0]}
-              >
-                <boxGeometry args={[Math.abs(CHW_X_SUPPLY - CHW_X_RETURN) + 1.20, 0.08, 1.10]} />
-                <meshStandardMaterial color="#7a7270" roughness={0.55} metalness={0.65} />
-              </mesh>
-              {/* Cover-plate retaining bolts around the perimeter */}
-              {(() => {
-                const cx = (CHW_X_SUPPLY + CHW_X_RETURN) / 2;
-                const w  = Math.abs(CHW_X_SUPPLY - CHW_X_RETURN) + 1.10;
-                const h  = 1.0;
-                const out: React.ReactElement[] = [];
-                const N_X = 7, N_Y = 5;
-                for (let i = 0; i < N_X; i++) {
-                  for (let j = 0; j < N_Y; j++) {
-                    if (i > 0 && i < N_X - 1 && j > 0 && j < N_Y - 1) continue;
-                    const bx = cx - w / 2 + (i / (N_X - 1)) * w;
-                    const by = CHW_Y_FLANGE - h / 2 + (j / (N_Y - 1)) * h;
-                    out.push(
-                      <mesh key={`chw-cover-bolt-${i}-${j}`} position={[bx, by, CHW_STUB_Z_IN - 0.084]} rotation={[Math.PI / 2, 0, 0]}>
-                        <cylinderGeometry args={[0.022, 0.022, 0.02, 6]} />
-                        <meshStandardMaterial color="#1c1c1c" roughness={0.5} metalness={0.85} />
-                      </mesh>
-                    );
-                  }
-                }
-                return <>{out}</>;
-              })()}
+                           elbowR={CHW_R} boltCount={12} insulated
+                           vesselColor={evapShellColor} />
+              <NozzleChain c={chwRet} pipeColor="#7eb8d8" insColor="#5a9ec4"
+                           elbowR={CHW_R} boltCount={12} insulated
+                           vesselColor={evapShellColor} />
+              {/* No separate cover plate — the evaporator barrel end cap in the
+                  GLB already reads as the marine-waterbox face. The two stacked
+                  FlangedConnections bolt directly onto the visible barrel cap. */}
             </group>
 
-            {/* ── CDW circuit → CONDENSER (lower) shell, +Z head ── */}
+            {/* ── CDW circuit → CONDENSER (lower) shell, +Z head ──
+                The barrel-head cap of Cylinder002_Baked.001 already reads
+                as the marine-waterbox face in the GLB, so we don't draw
+                a separate cover plate / bonnet here — the two stacked
+                FlangedConnections bolt directly onto the visible barrel
+                cap and that's all the user needs to see. */}
             <group>
               <NozzleChain c={cdwSup} pipeColor="#1d7a3a" insColor="#155a28"
-                           elbowR={CDW_R} boltCount={12} insulated={false} />
+                           elbowR={CDW_R} boltCount={12} insulated={false}
+                           vesselColor={condShellColor} />
               <NozzleChain c={cdwRet} pipeColor="#7ec07a" insColor="#5fa05c"
-                           elbowR={CDW_R} boltCount={12} insulated={false} />
-              {/* Marine-waterbox cover plate / bonnet behind both flanges */}
-              <mesh
-                position={[
-                  (CW_X_SUPPLY + CW_X_RETURN) / 2,
-                  CW_Y_FLANGE,
-                  CW_STUB_Z_IN + 0.04,
-                ]}
-                rotation={[Math.PI / 2, 0, 0]}
-              >
-                <boxGeometry args={[Math.abs(CW_X_SUPPLY - CW_X_RETURN) + 1.20, 0.08, 1.10]} />
-                <meshStandardMaterial color="#7a7270" roughness={0.55} metalness={0.65} />
-              </mesh>
-              {/* Cover-plate retaining bolts around the perimeter */}
-              {(() => {
-                const cx = (CW_X_SUPPLY + CW_X_RETURN) / 2;
-                const w  = Math.abs(CW_X_SUPPLY - CW_X_RETURN) + 1.10;
-                const h  = 1.0;
-                const out: React.ReactElement[] = [];
-                const N_X = 7, N_Y = 5;
-                for (let i = 0; i < N_X; i++) {
-                  for (let j = 0; j < N_Y; j++) {
-                    if (i > 0 && i < N_X - 1 && j > 0 && j < N_Y - 1) continue;
-                    const bx = cx - w / 2 + (i / (N_X - 1)) * w;
-                    const by = CW_Y_FLANGE - h / 2 + (j / (N_Y - 1)) * h;
-                    out.push(
-                      <mesh key={`cdw-cover-bolt-${i}-${j}`} position={[bx, by, CW_STUB_Z_IN + 0.084]} rotation={[Math.PI / 2, 0, 0]}>
-                        <cylinderGeometry args={[0.022, 0.022, 0.02, 6]} />
-                        <meshStandardMaterial color="#1c1c1c" roughness={0.5} metalness={0.85} />
-                      </mesh>
-                    );
-                  }
-                }
-                return <>{out}</>;
-              })()}
+                           elbowR={CDW_R} boltCount={12} insulated={false}
+                           vesselColor={condShellColor} />
             </group>
           </>
         );
@@ -2939,27 +3702,27 @@ function EngineRoom({
       <YStrainer
         position={[-8.8, 1.10, CHW_Z_RETURN]}
         pipeRadius={MAIN_PIPE_RADIUS}
-        bodyColor="#7a6e4e"
+        bodyColor="#4a7a9a"
         idBand={false}
       />
       <GlobeValve
         valveId="pipe_globe_chwr_balance"
         position={[-9.65, 1.10, CHW_Z_RETURN]}
         pipeRadius={MAIN_PIPE_RADIUS}
-        bodyColor="#7a6e4e"
+        bodyColor="#4a7a9a"
       />
       <ButterflyValve
         valveId="pipe_bf_chwr_secondary"
         position={[-10.5, 1.10, CHW_Z_RETURN]}
         pipeRadius={MAIN_PIPE_RADIUS}
         outerRadius={MAIN_PIPE_INS_RADIUS}
-        bodyColor="#7a6e4e"
+        bodyColor="#4a7a9a"
       />
       {/* swing check valve — stops reverse flow through evap when pump off */}
       <CheckValve
         position={[-15.0, 1.10, CHW_Z_RETURN]}
         pipeRadius={MAIN_PIPE_RADIUS}
-        bodyColor="#7a6e4e"
+        bodyColor="#4a7a9a"
       />
       <TestPort
         position={[-17.5, 1.10, CHW_Z_RETURN]}
@@ -3100,6 +3863,9 @@ function EngineRoom({
         rotation={[0, 0, Math.PI / 2]}
         pipeRadius={MAIN_PIPE_RADIUS}
       />
+
+      {/* pid.json — makeup, chemical, pumps, expansion, electrical, FT/PDI/PSV */}
+      <PidPlantSystems />
     </group>
   );
 }
@@ -3137,6 +3903,57 @@ function ChillerModel({
 }) {
   const { scene } = useGLTF('/models/chiller-r2/Chiller_R2.glb');
   const hmiMountRef = useRef<THREE.Group>(null);
+
+  /* ── Sample baked shell colours so procedural weld-necks match the GLB ──
+     The condenser & evaporator shells are textured-not-flat-coloured, so we
+     can't read the tint off material.color directly. Instead we render the
+     baked diffuse map into a 1×1 canvas via drawImage and read the resulting
+     averaged pixel — that gives us a solid hex that visually matches the
+     beige YORK barrel. The colour is pushed into useChillerColorStore where
+     procedural geometry (FlangedConnection vesselNeckColor) consumes it. */
+  useLayoutEffect(() => {
+    const setShellColor = useChillerColorStore.getState().setShellColor;
+    // Mesh-name → which shell it belongs to. Only the canonical 002 / 001
+    // names are required; the suffixed duplicates get the same map anyway.
+    const targets: Array<[string, 'condenser' | 'evaporator']> = [
+      ['Cylinder002_Baked', 'condenser'],
+      ['Cylinder001_Baked', 'evaporator'],
+    ];
+
+    function avgPixelHex(tex: THREE.Texture | null): string | null {
+      const img = tex && (tex.image as HTMLImageElement | HTMLCanvasElement | ImageBitmap | undefined);
+      if (!img) return null;
+      const w = (img as HTMLImageElement).width || (img as ImageBitmap).width;
+      const h = (img as HTMLImageElement).height || (img as ImageBitmap).height;
+      if (!w || !h) return null;
+      try {
+        const c = document.createElement('canvas');
+        c.width = 1; c.height = 1;
+        const ctx = c.getContext('2d');
+        if (!ctx) return null;
+        // Drawing into a 1×1 canvas asks the browser to filter the image
+        // down to a single average pixel — perfect for grabbing the gross
+        // tint of a complex baked diffuse map.
+        ctx.drawImage(img as CanvasImageSource, 0, 0, 1, 1);
+        const d = ctx.getImageData(0, 0, 1, 1).data;
+        const r = d[0].toString(16).padStart(2, '0');
+        const gg = d[1].toString(16).padStart(2, '0');
+        const b = d[2].toString(16).padStart(2, '0');
+        return `#${r}${gg}${b}`;
+      } catch {
+        return null;
+      }
+    }
+
+    for (const [meshName, which] of targets) {
+      const mesh = scene.getObjectByName(meshName) as THREE.Mesh | undefined;
+      if (!mesh) continue;
+      const mat = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.MeshStandardMaterial | undefined;
+      const map = mat?.map ?? null;
+      const hex = avgPixelHex(map);
+      if (hex) setShellColor(which, hex);
+    }
+  }, [scene]);
 
   useLayoutEffect(() => {
     const g = hmiMountRef.current;
@@ -3451,7 +4268,7 @@ export default function App() {
   // exits walk mode via the top bar "Walk Mode" toggle.
 
   return (
-    <div style={{ width: '100vw', height: '100vh', background: '#0a0a0a', position: 'relative', overflow: 'hidden' }}>
+    <div style={{ width: '100vw', height: '100vh', background: '#9bd0ff', position: 'relative', overflow: 'hidden' }}>
       <ControlPanelUI />
       {/* iPad widget */}
       <CxAlloyWidget onOpen={() => setShowCxAlloy(true)} />
@@ -3472,6 +4289,74 @@ export default function App() {
           }}
         >
           <Suspense fallback={null}>
+            {/* Scene background fallback color — visible behind the Sky shader
+                while it warms up, and in the rare patches that aren't covered
+                by the skydome (e.g. extreme camera FOV). */}
+            <color attach="background" args={['#9bd0ff']} />
+            {/* Atmospheric scattering sky — sun position matches the
+                directional light in <Scene/> for consistent shading. */}
+            <Sky
+              distance={4500}
+              sunPosition={SUN_POSITION}
+              inclination={0}
+              azimuth={0.25}
+              turbidity={3}
+              rayleigh={1.4}
+              mieCoefficient={0.005}
+              mieDirectionalG={0.8}
+            />
+            {/* Drifting cumulus over the yard — three discrete formations so
+                the sky has parallax / depth without a uniform fog look. */}
+            <Clouds material={THREE.MeshLambertMaterial} limit={120} range={120}>
+              <Cloud
+                seed={1}
+                position={[-30, 55, -30]}
+                segments={28}
+                bounds={[28, 4, 8]}
+                volume={9}
+                color="#ffffff"
+                opacity={0.85}
+                fade={140}
+                growth={4}
+                speed={0.08}
+              />
+              <Cloud
+                seed={2}
+                position={[40, 62, 25]}
+                segments={26}
+                bounds={[24, 5, 8]}
+                volume={8}
+                color="#fafdff"
+                opacity={0.78}
+                fade={140}
+                growth={4}
+                speed={0.06}
+              />
+              <Cloud
+                seed={3}
+                position={[5, 48, 70]}
+                segments={20}
+                bounds={[18, 3, 6]}
+                volume={6}
+                color="#ffffff"
+                opacity={0.7}
+                fade={140}
+                growth={3}
+                speed={0.05}
+              />
+              <Cloud
+                seed={4}
+                position={[-60, 70, 50]}
+                segments={22}
+                bounds={[20, 4, 7]}
+                volume={7}
+                color="#f4f8ff"
+                opacity={0.72}
+                fade={140}
+                growth={3}
+                speed={0.04}
+              />
+            </Clouds>
             <Scene />
             <EngineRoom
               onHmiZoom={() => {

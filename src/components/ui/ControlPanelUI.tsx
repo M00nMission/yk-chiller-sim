@@ -2,9 +2,21 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useSimulationStore } from '../../store/useSimulationStore';
 import { useInspectStore } from '../../store/useInspectStore';
 import { useWalkModeStore } from '../../store/useWalkModeStore';
+import { usePlantLayerStore, type PlantLayerKey } from '../../store/usePlantLayerStore';
+import { useGarageDoorStore } from '../../store/useGarageDoorStore';
+
+const LAYER_ROWS: Array<{ key: PlantLayerKey; label: string }> = [
+  { key: 'hydronics', label: 'Hydronics' },
+  { key: 'electrical', label: 'Electrical' },
+  { key: 'instrumentation', label: 'Instrumentation' },
+  { key: 'drains', label: 'Drains & petcocks' },
+  { key: 'makeupChemical', label: 'Makeup & chemical' },
+];
 
 export function ControlPanelUI() {
   const { state } = useSimulationStore();
+  const layers = usePlantLayerStore((s) => s.layers);
+  const toggleLayer = usePlantLayerStore((s) => s.toggleLayer);
   const inspectMode = useInspectStore((s) => s.inspectMode);
   const setInspectMode = useInspectStore((s) => s.setInspectMode);
   const hoveredName = useInspectStore((s) => s.hoveredName);
@@ -13,14 +25,16 @@ export function ControlPanelUI() {
   const copyFeedback = useInspectStore((s) => s.copyFeedback);
   const walkMode = useWalkModeStore((s) => s.walkMode);
   const setWalkMode = useWalkModeStore((s) => s.setWalkMode);
+  const garageDoorsOpen = useGarageDoorStore((s) => s.open);
+  const toggleGarageDoors = useGarageDoorStore((s) => s.toggle);
 
   return (
     <>
       {/* Top bar */}
       <div className="absolute top-0 left-0 right-0 h-12 bg-[#1a1d21] border-b border-[#2d3239] flex items-center justify-between px-6 z-10">
         <div className="flex items-center gap-4 mx-3">
-          <h1 className="text-white font-semibold text-lg tracking-tight">York YK Centrifugal Chiller</h1>
-          <span className="text-[#666] text-sm">Simulator v1.0</span>
+          <h1 className="text-white font-semibold text-lg tracking-tight">YORK Water-Cooled Chiller Plant</h1>
+          <span className="text-[#666] text-sm">Simulator · pid.json layout</span>
         </div>
         <div className="flex items-center gap-3 mx-3">
           <button
@@ -48,10 +62,62 @@ export function ControlPanelUI() {
           >
             Walk Mode
           </button>
+          <button
+            type="button"
+            onClick={toggleGarageDoors}
+            className={
+              garageDoorsOpen
+                ? 'text-xs font-medium px-2.5 py-1 rounded border border-amber-500 bg-amber-950/80 text-amber-100 inline-flex items-center gap-1.5'
+                : 'text-xs font-medium px-2.5 py-1 rounded border border-[#3d4249] bg-[#23272c] text-[#bbb] hover:bg-[#2a2f35] hover:text-white inline-flex items-center gap-1.5'
+            }
+            aria-pressed={garageDoorsOpen}
+            title="Open or close the south-face roll-up garage doors (OHD-1 / OHD-2 / OHD-3)"
+          >
+            <span
+              aria-hidden
+              className={`inline-block w-1.5 h-1.5 rounded-full ${garageDoorsOpen ? 'bg-amber-300 shadow-[0_0_6px_rgba(252,211,77,0.85)]' : 'bg-[#666]'}`}
+            />
+            Garage {garageDoorsOpen ? 'Open' : 'Closed'}
+          </button>
           <StatusIndicator label="Compressor" active={state.compressorRunning} color="green" />
           <StatusIndicator label="Oil Heater" active={state.oilHeaterOn} color="amber" />
           <StatusIndicator label="Fault" active={state.highDischargePressureTrip || state.lowSuctionPressureTrip} color="red" />
+          <div className="flex flex-wrap items-center gap-1.5 pl-3 ml-2 border-l border-[#2d3239] max-w-[min(52vw,28rem)] sm:max-w-none">
+            <span className="text-[10px] uppercase tracking-wider text-[#6b7280] mr-1 shrink-0">Layers</span>
+            {LAYER_ROWS.map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                title={`Toggle ${label}`}
+                onClick={() => toggleLayer(key)}
+                className={
+                  layers[key]
+                    ? 'text-[10px] font-medium px-2 py-0.5 rounded border border-emerald-700/80 bg-emerald-950/50 text-emerald-100'
+                    : 'text-[10px] font-medium px-2 py-0.5 rounded border border-[#3d4249] bg-[#23272c] text-[#777] hover:text-[#bbb]'
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
+      </div>
+
+      {/* Color / service legend (pid color_coding_standards_2026) */}
+      <div
+        className="absolute top-14 right-4 z-20 max-w-[min(20rem,calc(100vw-2rem))] rounded-lg border border-[#2d3239] bg-[#121518]/92 px-3 py-2.5 text-[11px] text-[#c8d0d8] shadow-lg backdrop-blur-sm pointer-events-none"
+        aria-hidden
+      >
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-[#6b7280] mb-1.5">Service colors</div>
+        <ul className="space-y-1 leading-snug">
+          <li><span className="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1.5" style={{ background: '#0d3f7a' }} /> CHWS — chilled supply</li>
+          <li><span className="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1.5" style={{ background: '#4a8ab8' }} /> CHWR — chilled return</li>
+          <li><span className="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1.5" style={{ background: '#1d7a3a' }} /> CWS — condenser supply</li>
+          <li><span className="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1.5" style={{ background: '#7ec07a' }} /> CWR — condenser return</li>
+          <li><span className="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1.5" style={{ background: '#f2f4f7' }} /> Makeup (domestic)</li>
+          <li><span className="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1.5" style={{ background: '#d96818' }} /> Chemical feed</li>
+          <li><span className="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1.5" style={{ background: '#8a8d92' }} /> Drain / overflow</li>
+        </ul>
       </div>
 
       {/* Inspect mode: mesh id readout */}
