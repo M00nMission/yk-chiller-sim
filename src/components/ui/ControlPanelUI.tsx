@@ -1,30 +1,16 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSimulationStore } from '../../store/useSimulationStore';
 import { useInspectStore } from '../../store/useInspectStore';
-import { useWalkModeStore } from '../../store/useWalkModeStore';
-import { usePlantLayerStore, type PlantLayerKey } from '../../store/usePlantLayerStore';
 import { useGarageDoorStore } from '../../store/useGarageDoorStore';
-
-const LAYER_ROWS: Array<{ key: PlantLayerKey; label: string }> = [
-  { key: 'hydronics', label: 'Hydronics' },
-  { key: 'electrical', label: 'Electrical' },
-  { key: 'instrumentation', label: 'Instrumentation' },
-  { key: 'drains', label: 'Drains & petcocks' },
-  { key: 'makeupChemical', label: 'Makeup & chemical' },
-];
 
 export function ControlPanelUI() {
   const { state } = useSimulationStore();
-  const layers = usePlantLayerStore((s) => s.layers);
-  const toggleLayer = usePlantLayerStore((s) => s.toggleLayer);
   const inspectMode = useInspectStore((s) => s.inspectMode);
   const setInspectMode = useInspectStore((s) => s.setInspectMode);
   const hoveredName = useInspectStore((s) => s.hoveredName);
   const hoveredPath = useInspectStore((s) => s.hoveredPath);
   const hoveredDetail = useInspectStore((s) => s.hoveredDetail);
   const copyFeedback = useInspectStore((s) => s.copyFeedback);
-  const walkMode = useWalkModeStore((s) => s.walkMode);
-  const setWalkMode = useWalkModeStore((s) => s.setWalkMode);
   const garageDoorsOpen = useGarageDoorStore((s) => s.open);
   const toggleGarageDoors = useGarageDoorStore((s) => s.toggle);
 
@@ -51,19 +37,6 @@ export function ControlPanelUI() {
           </button>
           <button
             type="button"
-            onClick={() => setWalkMode(!walkMode)}
-            className={
-              walkMode
-                ? 'text-xs font-medium px-2.5 py-1 rounded border border-emerald-600 bg-emerald-950/80 text-emerald-100'
-                : 'text-xs font-medium px-2.5 py-1 rounded border border-[#3d4249] bg-[#23272c] text-[#bbb] hover:bg-[#2a2f35] hover:text-white'
-            }
-            aria-pressed={walkMode}
-            title="Drop a technician avatar into the room (Arrows / WASD to move, Shift to run, Esc to exit)"
-          >
-            Walk Mode
-          </button>
-          <button
-            type="button"
             onClick={toggleGarageDoors}
             className={
               garageDoorsOpen
@@ -82,24 +55,6 @@ export function ControlPanelUI() {
           <StatusIndicator label="Compressor" active={state.compressorRunning} color="green" />
           <StatusIndicator label="Oil Heater" active={state.oilHeaterOn} color="amber" />
           <StatusIndicator label="Fault" active={state.highDischargePressureTrip || state.lowSuctionPressureTrip} color="red" />
-          <div className="flex flex-wrap items-center gap-1.5 pl-3 ml-2 border-l border-[#2d3239] max-w-[min(52vw,28rem)] sm:max-w-none">
-            <span className="text-[10px] uppercase tracking-wider text-[#6b7280] mr-1 shrink-0">Layers</span>
-            {LAYER_ROWS.map(({ key, label }) => (
-              <button
-                key={key}
-                type="button"
-                title={`Toggle ${label}`}
-                onClick={() => toggleLayer(key)}
-                className={
-                  layers[key]
-                    ? 'text-[10px] font-medium px-2 py-0.5 rounded border border-emerald-700/80 bg-emerald-950/50 text-emerald-100'
-                    : 'text-[10px] font-medium px-2 py-0.5 rounded border border-[#3d4249] bg-[#23272c] text-[#777] hover:text-[#bbb]'
-                }
-              >
-                {label}
-              </button>
-            ))}
-          </div>
         </div>
       </div>
 

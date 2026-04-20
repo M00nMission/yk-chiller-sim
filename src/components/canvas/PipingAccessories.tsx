@@ -15,7 +15,7 @@
 
 import { useRef, useState, useMemo, useEffect } from 'react';
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
-import { Text, useCursor } from '@react-three/drei';
+import { Text, Billboard, useCursor } from '@react-three/drei';
 import * as THREE from 'three';
 import { useSimulationStore } from '../../store/useSimulationStore';
 
@@ -242,17 +242,19 @@ export function PressureGauge({
         <meshStandardMaterial color="#1a1a1a" roughness={0.5} metalness={0.7} />
       </mesh>
       {/* tag */}
-      <Text
-        position={[0, baseY + 0.50, 0.045]}
-        fontSize={0.07}
-        color="#ffffff"
-        outlineColor="#000"
-        outlineWidth={0.006}
-        anchorX="center"
-        anchorY="middle"
-      >
-        {label}
-      </Text>
+      <Billboard>
+        <Text
+          position={[0, baseY + 0.50, 0.045]}
+          fontSize={0.07}
+          color="#ffffff"
+          outlineColor="#000"
+          outlineWidth={0.006}
+          anchorX="center"
+          anchorY="middle"
+        >
+          {label}
+        </Text>
+      </Billboard>
     </group>
   );
 }
@@ -316,17 +318,19 @@ export function TemperatureGauge({
         <cylinderGeometry args={[0.016, 0.016, 0.006, 10]} />
         <meshStandardMaterial color="#1a1a1a" />
       </mesh>
-      <Text
-        position={[0, baseY + 0.57, 0.04]}
-        fontSize={0.07}
-        color="#ffffff"
-        outlineColor="#000"
-        outlineWidth={0.006}
-        anchorX="center"
-        anchorY="middle"
-      >
-        {label}
-      </Text>
+      <Billboard>
+        <Text
+          position={[0, baseY + 0.57, 0.04]}
+          fontSize={0.07}
+          color="#ffffff"
+          outlineColor="#000"
+          outlineWidth={0.006}
+          anchorX="center"
+          anchorY="middle"
+        >
+          {label}
+        </Text>
+      </Billboard>
     </group>
   );
 }
@@ -907,15 +911,17 @@ export function MotorizedValve({
         <meshStandardMaterial color="#444" roughness={0.7} metalness={0.6} />
       </mesh>
       {label && (
-        <Text
-          position={[0, r * 1.6 + 0.45, 0.245]}
-          fontSize={0.07}
-          color="#1a1a1a"
-          anchorX="center"
-          anchorY="middle"
-        >
-          {label}
-        </Text>
+        <Billboard>
+          <Text
+            position={[0, r * 1.6 + 0.45, 0.245]}
+            fontSize={0.07}
+            color="#1a1a1a"
+            anchorX="center"
+            anchorY="middle"
+          >
+            {label}
+          </Text>
+        </Billboard>
       )}
     </group>
   );
@@ -1425,15 +1431,17 @@ export function PipeTag({
         <boxGeometry args={[0.55, 0.16, 0.025]} />
         <meshStandardMaterial color={color} roughness={0.65} metalness={0.3} />
       </mesh>
-      <Text
-        position={[0, 0, 0.018]}
-        fontSize={0.08}
-        color={textColor}
-        anchorX="center"
-        anchorY="middle"
-      >
-        {text}
-      </Text>
+      <Billboard>
+        <Text
+          position={[0, 0, 0.018]}
+          fontSize={0.08}
+          color={textColor}
+          anchorX="center"
+          anchorY="middle"
+        >
+          {text}
+        </Text>
+      </Billboard>
     </group>
   );
 }

@@ -32,11 +32,12 @@
  */
 import { useRef, type JSX } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Text } from '@react-three/drei';
+import { Text, Billboard } from '@react-three/drei';
 import * as THREE from 'three';
 import {
   EndSuctionHvacPump,
   FlangedSpool,
+  getPumpBaseFootprint,
   getPumpHydraulicPorts,
   type PumpPaint,
 } from './IndustrialCentrifugalPump';
@@ -51,10 +52,16 @@ import {
 } from './PipingAccessories';
 
 /* ─────────── shared layout constants (exported for parent tie-in routing) ─────────── */
-export const PIPE_R = 0.165;                         // main hydronic radius (~12" Sch.40)
+/* Pipe sizing rationale (≈ 1500-ton YORK YK chiller):
+     CHW load   3,600 GPM  → 16″ Sch.40 OD ≈ 0.41 m → R ≈ 0.20 m
+     CDW load   4,500 GPM  → 18″ Sch.40 OD ≈ 0.46 m → R ≈ 0.22 m  (PIPE_R × 1.08 inside duty='cdw')
+   Pump body autosizes off PIPE_R, so this single constant scales the
+   nozzle barrel, base-frame, motor, and skid all together.                */
+export const PIPE_R = 0.20;                          // main pump-side hydronic radius (~16" Sch.40)
 export const SUCTION_RUN_DIA_MULT = 6.5;             // ≥ 6–8 pipe diameters per spec
 export const CEILING_Y = 8.6;                        // top-of-riser elevation (engine room)
-export const VFD_OFFSET_Z = 1.55;                    // wall-mount distance from pump centerline
+export const SKID_HEIGHT = 0.20;                     // concrete housekeeping pad height (8″)
+export const VFD_OFFSET_Z = 2.95;                    // VFD enclosure wall-mount stand-off from pump CL
 export const ELBOW_R_FACTOR = 4.5;                   // long-radius elbow R / pipe radius
 
 /* ─────────── ASHRAE 2026 service colors ─────────── */
@@ -106,17 +113,19 @@ function InlineFlowTransmitter({
         <cylinderGeometry args={[0.025, 0.02, 0.06, 8]} />
         <meshStandardMaterial color="#3a3a3a" roughness={0.5} metalness={0.6} />
       </mesh>
-      <Text
-        position={[0, pipeRadius * 1.4 + 0.30, 0]}
-        fontSize={0.075}
-        color="#101216"
-        anchorX="center"
-        anchorY="middle"
-        outlineWidth={0.005}
-        outlineColor="#ffffff"
-      >
-        {tag}
-      </Text>
+      <Billboard>
+        <Text
+          position={[0, pipeRadius * 1.4 + 0.30, 0]}
+          fontSize={0.075}
+          color="#101216"
+          anchorX="center"
+          anchorY="middle"
+          outlineWidth={0.005}
+          outlineColor="#ffffff"
+        >
+          {tag}
+        </Text>
+      </Billboard>
     </group>
   );
 }
@@ -177,9 +186,11 @@ function PdiAcrossPump({
           <boxGeometry args={[0.008, 0.05, 0.003]} />
           <meshStandardMaterial color="#cc1818" />
         </mesh>
-        <Text position={[0, -0.13, 0.075]} fontSize={0.05} color="#0a0a0a" anchorX="center" anchorY="middle">
-          {tag}
-        </Text>
+        <Billboard>
+          <Text position={[0, -0.13, 0.075]} fontSize={0.05} color="#0a0a0a" anchorX="center" anchorY="middle">
+            {tag}
+          </Text>
+        </Billboard>
       </group>
     </group>
   );
@@ -246,34 +257,79 @@ function VfdWallEnclosure({
     const t = state.clock.elapsedTime;
     ledRef.current.emissiveIntensity = running ? 1.2 + Math.sin(t * 2.2) * 0.45 : 0;
   });
+  /* Free-standing NEMA-12 floor-mounted VFD cabinet, ABB ACH580 / Danfoss VLT
+     class for ~300 HP @ 480V. Sized 60 cm × 200 cm × 140 cm with integral
+     plinth and louvered cooling vents. The component renders FROM THE FLOOR UP
+     (origin at the slab line) — so callers should pass Y = 0. */
+  const W = 0.55;       // depth along X — door faces +X (back toward pump after rotation)
+  const H = 2.05;       // total height (incl. 100 mm plinth)
+  const D = 1.40;       // width along Z
+  const plinth = 0.10;
+  const yCabCenter = plinth + (H - plinth) * 0.5;     // body Y center
+  const yDoor = W * 0.5 + 0.001;
   return (
     <group name={`electrical:VFD-${tag}`} position={position} rotation={rotation}>
-      <mesh castShadow receiveShadow>
-        <boxGeometry args={[0.25, 1.95, 1.25]} />
+      {/* Concrete housekeeping pad under the VFD (matches pump skid finish) */}
+      <mesh position={[0, 0.04, 0]} receiveShadow>
+        <boxGeometry args={[W + 0.45, 0.08, D + 0.30]} />
+        <meshStandardMaterial color="#a89e8c" roughness={0.95} metalness={0.02} />
+      </mesh>
+      {/* Plinth (raises cabinet 100 mm off the floor for cable entry from below) */}
+      <mesh position={[0, 0.08 + plinth * 0.5, 0]} castShadow receiveShadow>
+        <boxGeometry args={[W * 0.95, plinth, D * 0.95]} />
+        <meshStandardMaterial color="#2c2e32" roughness={0.62} metalness={0.45} />
+      </mesh>
+      {/* Main cabinet body */}
+      <mesh position={[0, yCabCenter, 0]} castShadow receiveShadow>
+        <boxGeometry args={[W, H - plinth, D]} />
         <meshStandardMaterial color="#6a6e74" roughness={0.48} metalness={0.42} />
       </mesh>
-      <mesh position={[0.13, 0.50, 0]}>
-        <planeGeometry args={[0.78, 0.55]} />
+      {/* Door panel (front face) */}
+      <mesh position={[yDoor, yCabCenter, 0]}>
+        <planeGeometry args={[D * 0.94, H - plinth - 0.06]} />
+        <meshStandardMaterial color="#5e6268" roughness={0.55} metalness={0.45} />
+      </mesh>
+      {/* HMI display window */}
+      <mesh position={[yDoor + 0.003, yCabCenter + 0.55, 0]}>
+        <boxGeometry args={[0.005, 0.32, 0.55]} />
         <meshStandardMaterial color="#1a1c20" roughness={0.55} metalness={0.2} />
       </mesh>
-      {/* keypad (cluster of nubs) */}
+      <mesh position={[yDoor + 0.005, yCabCenter + 0.62, -0.05]}>
+        <planeGeometry args={[0.18, 0.10]} />
+        <meshStandardMaterial color="#1f6e2a" emissive="#1a4a1f" emissiveIntensity={running ? 0.45 : 0.06} />
+      </mesh>
+      {/* keypad nubs (4 × 3) */}
       {Array.from({ length: 12 }).map((_, i) => {
         const col = i % 4;
         const row = Math.floor(i / 4);
         return (
           <mesh
             key={i}
-            position={[0.135, 0.18 - row * 0.08, -0.18 + col * 0.12]}
+            position={[
+              yDoor + 0.006,
+              yCabCenter + 0.50 - row * 0.075,
+              0.10 + col * 0.075,
+            ]}
             rotation={[0, Math.PI / 2, 0]}
           >
-            <boxGeometry args={[0.05, 0.045, 0.012]} />
+            <boxGeometry args={[0.052, 0.052, 0.014]} />
             <meshStandardMaterial color="#3a3c40" roughness={0.6} metalness={0.3} />
           </mesh>
         );
       })}
+      {/* Louvered cooling vents at the bottom of the door */}
+      {Array.from({ length: 6 }).map((_, vi) => (
+        <mesh
+          key={`vent-${vi}`}
+          position={[yDoor + 0.006, plinth + 0.18 + vi * 0.038, 0]}
+        >
+          <boxGeometry args={[0.005, 0.026, D * 0.42]} />
+          <meshStandardMaterial color="#1c1e22" roughness={0.7} />
+        </mesh>
+      ))}
       {/* RUN status LED */}
-      <mesh position={[0.135, -0.40, -0.42]}>
-        <sphereGeometry args={[0.038, 14, 10]} />
+      <mesh position={[yDoor + 0.012, yCabCenter + 0.20, -0.32]}>
+        <sphereGeometry args={[0.040, 14, 10]} />
         <meshStandardMaterial
           ref={ledRef}
           color="#0c2d10"
@@ -282,20 +338,88 @@ function VfdWallEnclosure({
           toneMapped={false}
         />
       </mesh>
-      <Text position={[0.135, -0.40, -0.27]} fontSize={0.05} color="#dadcde" anchorX="left" anchorY="middle">
+      <Billboard>
+      <Text
+        position={[yDoor + 0.013, yCabCenter + 0.20, -0.20]}
+        fontSize={0.045}
+        color="#dadcde"
+        anchorX="left"
+        anchorY="middle"
+      >
         RUN
       </Text>
-      {/* local disconnect lever */}
-      <mesh position={[0.135, -0.78, 0.50]} rotation={[0, 0, -Math.PI / 6]}>
-        <boxGeometry args={[0.04, 0.20, 0.05]} />
+      </Billboard>
+      {/* FAULT LED */}
+      <mesh position={[yDoor + 0.012, yCabCenter + 0.10, -0.32]}>
+        <sphereGeometry args={[0.038, 14, 10]} />
+        <meshStandardMaterial color="#3a0c0c" emissive="#cc1818" emissiveIntensity={0.04} />
+      </mesh>
+      <Billboard>
+      <Text
+        position={[yDoor + 0.013, yCabCenter + 0.10, -0.20]}
+        fontSize={0.045}
+        color="#dadcde"
+        anchorX="left"
+        anchorY="middle"
+      >
+        FAULT
+      </Text>
+      </Billboard>
+      {/* Rotary disconnect handle */}
+      <mesh position={[yDoor + 0.020, yCabCenter - 0.05, 0.50]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.060, 0.060, 0.025, 16]} />
+        <meshStandardMaterial color="#3a3c40" roughness={0.5} metalness={0.5} />
+      </mesh>
+      <mesh position={[yDoor + 0.038, yCabCenter - 0.05, 0.50]} rotation={[0, 0, -Math.PI / 5]}>
+        <boxGeometry args={[0.018, 0.18, 0.04]} />
         <meshStandardMaterial color="#c01818" roughness={0.4} metalness={0.45} />
       </mesh>
-      <Text position={[0.135, 0.95, 0]} fontSize={0.10} color="#e8c627" anchorX="center" anchorY="middle" fontWeight={700}>
+      {/* E-Stop mushroom button */}
+      <mesh position={[yDoor + 0.018, yCabCenter - 0.20, 0.50]}>
+        <cylinderGeometry args={[0.052, 0.044, 0.015, 18]} />
+        <meshStandardMaterial color="#cc1010" roughness={0.35} metalness={0.45} />
+      </mesh>
+      <mesh position={[yDoor + 0.005, yCabCenter - 0.20, 0.50]}>
+        <cylinderGeometry args={[0.062, 0.062, 0.005, 18]} />
+        <meshStandardMaterial color="#e8c627" roughness={0.7} />
+      </mesh>
+      {/* Top-of-cabinet conduit hubs (power in, motor out) */}
+      <mesh position={[0, H + 0.04, -D * 0.30]}>
+        <cylinderGeometry args={[0.055, 0.055, 0.085, 14]} />
+        <meshStandardMaterial color="#7a7e84" roughness={0.5} metalness={0.55} />
+      </mesh>
+      <mesh position={[0, H + 0.04, D * 0.30]}>
+        <cylinderGeometry args={[0.055, 0.055, 0.085, 14]} />
+        <meshStandardMaterial color="#7a7e84" roughness={0.5} metalness={0.55} />
+      </mesh>
+      {/* Manufacturer nameplate header */}
+      <mesh position={[yDoor + 0.004, yCabCenter + 0.92, 0]}>
+        <planeGeometry args={[0.22, D * 0.55]} />
+        <meshStandardMaterial color="#0e1014" roughness={0.5} metalness={0.3} />
+      </mesh>
+      <Billboard>
+      <Text
+        position={[yDoor + 0.006, yCabCenter + 0.92, 0]}
+        fontSize={0.105}
+        color="#e8c627"
+        anchorX="center"
+        anchorY="middle"
+        fontWeight={700}
+      >
         VFD
       </Text>
-      <Text position={[0.135, -0.95, 0]} fontSize={0.07} color="#dddddd" anchorX="center" anchorY="middle">
+      </Billboard>
+      <Billboard>
+      <Text
+        position={[yDoor + 0.006, yCabCenter - 0.92, 0]}
+        fontSize={0.075}
+        color="#dddddd"
+        anchorX="center"
+        anchorY="middle"
+      >
         {tag}
       </Text>
+      </Billboard>
     </group>
   );
 }
@@ -413,6 +537,153 @@ function HorizPipe({
 }
 
 /* ============================================================================
+   Concrete inertia skid / housekeeping pad for a pump assembly.
+   8″ (200 mm) reinforced-concrete pad with a 25 mm grout layer on top, sized
+   per ASHRAE / SMACNA practice for hydronic plant pumps:
+     - Pump steel base-frame anchored with cast-in J-bolts (8 per skid)
+     - 150 mm overhang on each side of the base-frame for grout chamfer and
+       a clean drip ledge
+     - Grout cap (lighter color) provides the actual mating surface
+     - 25 mm chamfer on all top edges
+     - Visible J-bolt heads + nuts + washers around the pad perimeter
+     - Isolated from the slab by a 12 mm cork/rubber isolation strip (color band)
+   Total stack height: 200 mm pad + 25 mm grout + 110 mm pump base = 335 mm
+   to shaft-mounting plate, keeping the impeller well clear of any floor
+   wash-down water (NPLV / chiller plant best practice).
+============================================================================ */
+function ConcreteSkid({
+  baseL,
+  baseW,
+  overhang = 0.22,
+  height = 0.20,
+}: {
+  /** Base-frame length along X (from EndSuctionHvacPump geometry). */
+  baseL: number;
+  /** Base-frame width along Z. */
+  baseW: number;
+  /** How much the skid overhangs each edge of the frame (m). */
+  overhang?: number;
+  /** Concrete pad height (m), default 200 mm (8 inch). */
+  height?: number;
+}) {
+  const padL = baseL + overhang * 2;
+  const padW = baseW + overhang * 2;
+  const padH = height;
+  const groutH = 0.025;
+  const isoStripH = 0.012;
+  const chamH = 0.030;
+  const padTopY = padH;
+  /* Eight J-bolts: corners + mid-spans on the long edges (matches typical
+     pump base-frame footprint with 6-bolt or 8-bolt anchor pattern). */
+  const boltLocs: Array<[number, number]> = [
+    [-baseL * 0.42, -baseW * 0.36],
+    [ baseL * 0.42, -baseW * 0.36],
+    [-baseL * 0.42,  baseW * 0.36],
+    [ baseL * 0.42,  baseW * 0.36],
+    [ 0,            -baseW * 0.36],
+    [ 0,             baseW * 0.36],
+    [-baseL * 0.42,  0],
+    [ baseL * 0.42,  0],
+  ];
+  return (
+    <group name="concrete-skid">
+      {/* 12 mm cork/rubber vibration-isolation strip between slab and pad */}
+      <mesh position={[0, isoStripH * 0.5, 0]} receiveShadow>
+        <boxGeometry args={[padL + 0.02, isoStripH, padW + 0.02]} />
+        <meshStandardMaterial color="#3a2f24" roughness={0.98} metalness={0.0} />
+      </mesh>
+      {/* Main reinforced-concrete pad */}
+      <mesh position={[0, isoStripH + padH * 0.5, 0]} receiveShadow castShadow>
+        <boxGeometry args={[padL, padH, padW]} />
+        <meshStandardMaterial color="#a89e8c" roughness={0.95} metalness={0.02} />
+      </mesh>
+      {/* Form-tie marks (vertical scribes around the perimeter) */}
+      {Array.from({ length: 6 }).map((_, i) => {
+        const t = -padL * 0.5 + (i + 0.5) * (padL / 6);
+        return (
+          <group key={`form-${i}`}>
+            {[-padW * 0.5 - 0.001, padW * 0.5 + 0.001].map((zw, zi) => (
+              <mesh key={zi} position={[t, isoStripH + padH * 0.5, zw]} rotation={[0, 0, 0]}>
+                <boxGeometry args={[0.01, padH * 0.92, 0.005]} />
+                <meshStandardMaterial color="#8a8276" roughness={0.95} metalness={0.0} />
+              </mesh>
+            ))}
+          </group>
+        );
+      })}
+      {/* Grout cap on top of pad — lighter, smoother finish */}
+      <mesh position={[0, padTopY + isoStripH + groutH * 0.5, 0]} receiveShadow castShadow>
+        <boxGeometry args={[padL - 0.04, groutH, padW - 0.04]} />
+        <meshStandardMaterial color="#bdb6a8" roughness={0.78} metalness={0.05} />
+      </mesh>
+      {/* Top-edge chamfer strips — long sides (along X) */}
+      {[-padW * 0.5, padW * 0.5].map((pz, i) => (
+        <mesh
+          key={`cham-z-${i}`}
+          position={[
+            0,
+            isoStripH + padH - chamH * 0.5,
+            pz + (i === 0 ? chamH : -chamH) * 0.5,
+          ]}
+          rotation={[i === 0 ? Math.PI / 4 : -Math.PI / 4, 0, 0]}
+          castShadow
+        >
+          <boxGeometry args={[padL, chamH * 1.42, chamH * 1.42]} />
+          <meshStandardMaterial color="#9a9080" roughness={0.97} metalness={0.01} />
+        </mesh>
+      ))}
+      {/* Top-edge chamfer strips — short sides (along Z) */}
+      {[-padL * 0.5, padL * 0.5].map((px, i) => (
+        <mesh
+          key={`cham-x-${i}`}
+          position={[
+            px + (i === 0 ? chamH : -chamH) * 0.5,
+            isoStripH + padH - chamH * 0.5,
+            0,
+          ]}
+          rotation={[0, 0, i === 0 ? -Math.PI / 4 : Math.PI / 4]}
+          castShadow
+        >
+          <boxGeometry args={[chamH * 1.42, chamH * 1.42, padW]} />
+          <meshStandardMaterial color="#9a9080" roughness={0.97} metalness={0.01} />
+        </mesh>
+      ))}
+      {/* Cast-in J-bolt anchors with washer + hex-nut */}
+      {boltLocs.map(([bx, bz], bi) => {
+        const yTop = padTopY + isoStripH + groutH;
+        return (
+          <group key={`bolt-skid-${bi}`} position={[bx, yTop, bz]}>
+            {/* Threaded stud */}
+            <mesh position={[0, 0.045, 0]} castShadow>
+              <cylinderGeometry args={[0.020, 0.020, 0.090, 10]} />
+              <meshStandardMaterial color="#8a8684" roughness={0.42} metalness={0.82} />
+            </mesh>
+            {/* Hex nut */}
+            <mesh position={[0, 0.062, 0]} castShadow>
+              <cylinderGeometry args={[0.034, 0.034, 0.026, 6]} />
+              <meshStandardMaterial color="#3a3a38" roughness={0.55} metalness={0.78} />
+            </mesh>
+            {/* Washer */}
+            <mesh position={[0, 0.043, 0]}>
+              <cylinderGeometry args={[0.040, 0.040, 0.005, 16]} />
+              <meshStandardMaterial color="#9a9690" roughness={0.4} metalness={0.85} />
+            </mesh>
+          </group>
+        );
+      })}
+      {/* "DO NOT PAINT" yellow safety stripe along front edge */}
+      <mesh
+        position={[0, isoStripH + padH - chamH - 0.001, padW * 0.5 - 0.06]}
+        rotation={[-Math.PI / 2, 0, 0]}
+      >
+        <planeGeometry args={[padL * 0.78, 0.045]} />
+        <meshStandardMaterial color="#e8b923" roughness={0.85} metalness={0.05} />
+      </mesh>
+    </group>
+  );
+}
+
+/* ============================================================================
    Common pump-assembly props.
 ============================================================================ */
 export interface PumpAssemblyProps {
@@ -521,7 +792,10 @@ function PumpAssemblyBody({
 
   return (
     <>
-      {/* ── Concrete inertia-base / vibration-isolated pump (procedural geom) ── */}
+      {/* ── Concrete inertia-base / vibration-isolated pump (procedural geom).
+            EndSuctionHvacPump uses pumpShaftCenterlineY() internally, which now
+            already includes the skid stack height — so the steel base-frame is
+            rendered sitting on top of the grout cap. ── */}
       <EndSuctionHvacPump
         name={`pump:${tag}`}
         tag={tag}
@@ -712,27 +986,31 @@ function PumpAssemblyBody({
         dischargeTapWorld={[layout.dischargePipeFaceX - 0.05, yCL + PIPE_R, 0.10]}
       />
 
-      {/* ===================== LOW-POINT DRAIN AT VOLUTE ===================== */}
+      {/* ===================== LOW-POINT DRAIN AT VOLUTE =====================
+          Drain valve hangs off a short stub from the bottom of the volute, just
+          above the skid grout cap so the operator can plumb a hose to a floor
+          drain when servicing the pump. */}
       <DrainValve
         valveId={drainValveId}
-        position={[layout.voluteX, 0.10, 0]}
+        position={[layout.voluteX, layout.shaftY - PIPE_R * 2.0, 0]}
         rotation={[Math.PI / 2, 0, 0]}
         pipeRadius={PIPE_R * 0.55}
       />
 
       {/* ===================== TAG / SIGNAGE ===================== */}
-      <Text
-        position={[layout.voluteX, 1.55, 0]}
-        fontSize={0.13}
-        color="#f0f0f0"
-        outlineWidth={0.008}
-        outlineColor="#000000"
-        anchorX="center"
-        anchorY="middle"
-        fontWeight={700}
-      >
-        {tag}
-      </Text>
+      <Billboard position={[layout.voluteX, 1.55, 0]}>
+        <Text
+          fontSize={0.13}
+          color="#f0f0f0"
+          outlineWidth={0.008}
+          outlineColor="#000000"
+          anchorX="center"
+          anchorY="middle"
+          fontWeight={700}
+        >
+          {tag}
+        </Text>
+      </Billboard>
     </>
   );
 }
@@ -772,8 +1050,17 @@ export function CDWPPumpAssembly({
   paint = 'gold',
 }: PumpAssemblyProps) {
   const layout = computeAssemblyLayout('cdw');
+  /* Concrete skid footprint matches the long-coupled pump/motor baseplate:
+       • Long axis along Z (motor-to-pump), short axis along X (flange direction)
+       • Centered on the assembly midpoint in Z (NOT on Z=0 / volute) so the
+         pad actually underlies the motor as well as the pump. */
+  const baseFoot = getPumpBaseFootprint(PIPE_R, 'cdw');
   return (
     <group name={`pump-assembly:${tag}`} position={position} rotation={rotation}>
+      {/* Reinforced-concrete inertia pad — keeps pump above floor washdown */}
+      <group position={[layout.voluteX, 0, baseFoot.baseCenterZ]}>
+        <ConcreteSkid baseL={baseFoot.baseL} baseW={baseFoot.baseW} />
+      </group>
       <PumpAssemblyBody
         layout={layout}
         pipeColorSuction={COLOR.CWS}
@@ -786,8 +1073,7 @@ export function CDWPPumpAssembly({
         dischargeValveId={dischargeValveId}
         drainValveId={drainValveId}
       />
-      {/* CDWP discharge tail — short stub heading toward the YORK chiller
-          condenser inlet (the parent scene continues the route). */}
+      {/* CDWP discharge tail — short stub; parent scene bridges to CWS riser */}
       <HorizPipe
         x0={layout.xDischargeOut}
         x1={layout.xDischargeOut + 0.65}
@@ -795,18 +1081,23 @@ export function CDWPPumpAssembly({
         z={0}
         pipeColor={COLOR.CWS}
       />
-      <Text
-        position={[layout.xDischargeOut + 0.32, layout.shaftY + 0.28, 0]}
-        fontSize={0.07}
-        color="#0a4a0a"
-        anchorX="center"
-        anchorY="middle"
-      >
-        → CHILLER COND IN
-      </Text>
-      {/* VFD enclosure — wall-mounted alongside the pump */}
+      <Billboard position={[layout.xDischargeOut + 0.32, layout.shaftY + 0.28, 0]}>
+        <Text
+          fontSize={0.07}
+          color="#0a4a0a"
+          anchorX="center"
+          anchorY="middle"
+        >
+          → CWS CONDENSER
+        </Text>
+      </Billboard>
+      {/* VFD enclosure — free-standing on the floor, well clear of the motor
+          tail (motor reaches Z ≈ +1.55 at 1500-ton sizing). Door (HMI / LEDs /
+          E-Stop) is on +X locally; rotate −90° about Y so it faces the pump
+          which sits in the −Z direction. */}
       <VfdWallEnclosure
-        position={[layout.voluteX, 1.05, VFD_OFFSET_Z]}
+        position={[layout.voluteX, 0, VFD_OFFSET_Z]}
+        rotation={[0, -Math.PI / 2, 0]}
         tag={tag}
         running={running}
       />
@@ -845,8 +1136,18 @@ export function CHWPPumpAssembly({
   paint = 'blue',
 }: PumpAssemblyProps) {
   const layout = computeAssemblyLayout('chw');
+  /* Concrete skid footprint matches the long-coupled pump/motor baseplate
+     (long in Z, short in X, centered on assembly midpoint). */
+  const baseFoot = getPumpBaseFootprint(PIPE_R, 'chw');
+  /* CHWP discharge tail — short horizontal spool then up-riser toward ceiling.
+     The up-riser top connects (via PumpHydraulicTieIns) to the CHWS low header. */
+  const dischargeRiserX = layout.xDischargeOut + 0.65 + PIPE_R * ELBOW_R_FACTOR;
   return (
     <group name={`pump-assembly:${tag}`} position={position} rotation={rotation}>
+      {/* Reinforced-concrete inertia pad */}
+      <group position={[layout.voluteX, 0, baseFoot.baseCenterZ]}>
+        <ConcreteSkid baseL={baseFoot.baseL} baseW={baseFoot.baseW} />
+      </group>
       <PumpAssemblyBody
         layout={layout}
         pipeColorSuction={COLOR.CHR}
@@ -859,7 +1160,10 @@ export function CHWPPumpAssembly({
         dischargeValveId={dischargeValveId}
         drainValveId={drainValveId}
       />
-      {/* CHWP discharge tail — turns UP into a vertical CHS riser to the roof */}
+      {/* CHWP discharge tail:
+            flange → horizontal stub → 90° long-radius elbow → vertical CHS riser up.
+          The riser exits through the ceiling at (dischargeRiserX, CEILING_Y, 0) in
+          assembly-local space; the parent scene bridges this to the CHWS low header. */}
       <HorizPipe
         x0={layout.xDischargeOut}
         x1={layout.xDischargeOut + 0.65}
@@ -876,31 +1180,35 @@ export function CHWPPumpAssembly({
         toward={-1}
       />
       <VerticalPipe
-        x={layout.xDischargeOut + 0.65 + PIPE_R * 4.5}
+        x={dischargeRiserX}
         z={0}
         y0={layout.shaftY + 0.05}
         y1={CEILING_Y}
         pipeColor={COLOR.CHS}
         insulated
       />
-      {/* Roof / ceiling penetration sleeve on the CHS up-riser */}
-      <mesh position={[layout.xDischargeOut + 0.65 + PIPE_R * 4.5, CEILING_Y - 0.05, 0]}>
+      {/* Ceiling penetration sleeve */}
+      <mesh position={[dischargeRiserX, CEILING_Y - 0.05, 0]}>
         <cylinderGeometry args={[PIPE_R * 1.85, PIPE_R * 1.95, 0.18, 16]} />
         <meshStandardMaterial color="#7c8086" roughness={0.55} metalness={0.55} />
       </mesh>
-      <Text
-        position={[layout.xDischargeOut + 0.65 + PIPE_R * 4.5 + 0.35, CEILING_Y - 0.45, 0]}
-        fontSize={0.07}
-        color="#0a2540"
-        anchorX="left"
-        anchorY="middle"
-      >
-        CHS ↑ AHU COIL
-      </Text>
-      {/* VFD enclosure — wall-mounted on the opposite side from the CDWP unit */}
+      <Billboard position={[dischargeRiserX + 0.35, CEILING_Y - 0.45, 0]}>
+        <Text
+          fontSize={0.07}
+          color="#0a2540"
+          anchorX="center"
+          anchorY="middle"
+        >
+          CHS → CHWS HDR
+        </Text>
+      </Billboard>
+      {/* VFD enclosure — free-standing on the −Z side (away from the chiller,
+          since CHWP is at world Z = −9.5 with the chiller at Z = 0). This
+          keeps cabling and heat clear of the suction-side instrument cluster.
+          Door (HMI on +X locally) rotated +90° about Y to face the pump (+Z). */}
       <VfdWallEnclosure
-        position={[layout.voluteX, 1.05, -VFD_OFFSET_Z]}
-        rotation={[0, Math.PI, 0]}
+        position={[layout.voluteX, 0, -VFD_OFFSET_Z]}
+        rotation={[0, Math.PI / 2, 0]}
         tag={tag}
         running={running}
       />

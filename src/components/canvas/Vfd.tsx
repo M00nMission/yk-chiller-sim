@@ -34,7 +34,7 @@
      Place + rotate the wrapping group to position the VFD in world space.
 ============================================================================ */
 
-import { Text, Html } from '@react-three/drei';
+import { Text, Billboard, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { useMemo, type RefObject } from 'react';
 import { VfdHMI, VFD_HMI_ASPECT_RATIO } from '../ui/VfdHMI';
@@ -293,6 +293,7 @@ export function Vfd({
               opacity={0.92}
             />
           </mesh>
+          <Billboard>
           <Text
             position={[0.018, -0.055, 0]}
             rotation={[0, Math.PI / 2, 0]}
@@ -303,6 +304,7 @@ export function Vfd({
           >
             {lbl}
           </Text>
+          </Billboard>
         </group>
       ))}
 
@@ -327,6 +329,7 @@ export function Vfd({
           <planeGeometry args={[0.13, 0.04]} />
           <meshStandardMaterial color="#e8e3d2" roughness={0.6} metalness={0.05} />
         </mesh>
+        <Billboard>
         <Text
           position={[0.0008, -0.06, 0]}
           rotation={[0, Math.PI / 2, 0]}
@@ -337,6 +340,7 @@ export function Vfd({
         >
           HAND  OFF  AUTO
         </Text>
+        </Billboard>
       </group>
 
       {/* (3) DRIVE HMI — compact door-mounted graphic operator interface.
@@ -463,6 +467,7 @@ export function Vfd({
             <cylinderGeometry args={[0.034, 0.034, 0.022, 18]} />
             <meshStandardMaterial color={face} emissive={ec} emissiveIntensity={0.18} roughness={0.4} metalness={0.45} />
           </mesh>
+          <Billboard>
           <Text
             position={[0.025, 0, 0]}
             rotation={[0, Math.PI / 2, 0]}
@@ -475,6 +480,7 @@ export function Vfd({
           >
             {glyph}
           </Text>
+          </Billboard>
         </group>
       ))}
 
@@ -498,6 +504,7 @@ export function Vfd({
           <cylinderGeometry args={[0.054, 0.046, 0.024, 22]} />
           <meshStandardMaterial color={ESTOP_RED} roughness={0.45} metalness={0.3} />
         </mesh>
+        <Billboard>
         <Text
           position={[0.001, -0.10, 0]}
           rotation={[0, Math.PI / 2, 0]}
@@ -508,6 +515,7 @@ export function Vfd({
         >
           EMERGENCY  STOP
         </Text>
+        </Billboard>
       </group>
 
       {/* (6) UL / nameplate strip with TAG */}
@@ -518,6 +526,7 @@ export function Vfd({
         <planeGeometry args={[0.6, 0.10]} />
         <meshStandardMaterial color={NAMEPLATE_BG} roughness={0.55} metalness={0.05} />
       </mesh>
+      <Billboard>
       <Text
         position={[FRONT_X + 0.014, cabY + UPPER_CY - DOOR_UPPER_H / 2 + 0.092, 0]}
         rotation={[0, Math.PI / 2, 0]}
@@ -528,6 +537,8 @@ export function Vfd({
       >
         YORK  OptiSpeed™  VSD
       </Text>
+      </Billboard>
+      <Billboard>
       <Text
         position={[FRONT_X + 0.014, cabY + UPPER_CY - DOOR_UPPER_H / 2 + 0.057, 0]}
         rotation={[0, Math.PI / 2, 0]}
@@ -538,6 +549,7 @@ export function Vfd({
       >
         {tag} · 480V 3Ø · 600 HP · 720 A FLA
       </Text>
+      </Billboard>
 
       {/* ───────────────────────────────────────────────────────────────
           LOWER DOOR — power bay (heatsink + DC bus + power conductors)
@@ -615,6 +627,7 @@ export function Vfd({
         <planeGeometry args={[0.22, 0.10]} />
         <meshStandardMaterial color={WARNING_YELLOW} roughness={0.55} metalness={0.05} />
       </mesh>
+      <Billboard>
       <Text
         position={[FRONT_X + 0.014, cabY + LOWER_CY + DOOR_LOWER_H / 2 - 0.052, DOOR_W / 2 - 0.18]}
         rotation={[0, Math.PI / 2, 0]}
@@ -625,6 +638,8 @@ export function Vfd({
       >
         DANGER
       </Text>
+      </Billboard>
+      <Billboard>
       <Text
         position={[FRONT_X + 0.014, cabY + LOWER_CY + DOOR_LOWER_H / 2 - 0.085, DOOR_W / 2 - 0.18]}
         rotation={[0, Math.PI / 2, 0]}
@@ -635,6 +650,7 @@ export function Vfd({
       >
         ARC FLASH HAZARD
       </Text>
+      </Billboard>
 
       {/* ─── TOP COOLING-FAN GRILLE ───────────────────────────────────── */}
       <group position={[0, cabY + H / 2 + 0.026, 0]}>
@@ -685,6 +701,7 @@ export function Vfd({
       </group>
 
       {/* ─── OVERHEAD TAG (helps locate the cabinet from across the room) */}
+      <Billboard>
       <Text
         position={[0, cabY + H / 2 + 0.18, 0]}
         fontSize={0.18}
@@ -696,6 +713,7 @@ export function Vfd({
       >
         {tag}
       </Text>
+      </Billboard>
     </group>
   );
 }
@@ -939,6 +957,7 @@ export function VfdWiring({
           <planeGeometry args={[0.30, 0.07]} />
           <meshStandardMaterial color={NAMEPLATE_BG} roughness={0.55} metalness={0.05} />
         </mesh>
+        <Billboard>
         <Text
           position={[0.093, 0.10, 0]}
           rotation={[0, Math.PI / 2, 0]}
@@ -949,6 +968,8 @@ export function VfdWiring({
         >
           MOTOR T-BOX
         </Text>
+        </Billboard>
+        <Billboard>
         <Text
           position={[0.093, -0.03, 0]}
           rotation={[0, Math.PI / 2, 0]}
@@ -959,6 +980,7 @@ export function VfdWiring({
         >
           T1  T2  T3
         </Text>
+        </Billboard>
         {/* visible THHN conductors stubbing out the top into the conduit */}
         {([PHASE_A, PHASE_B, PHASE_C, GROUND] as const).map((c, i) => (
           <mesh key={`thhn-${i}`} position={[0.05 - i * 0.025, 0.225, -0.12 + i * 0.05]} rotation={[Math.PI / 2, 0, 0]}>

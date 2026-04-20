@@ -1038,9 +1038,11 @@ export function CxAlloyWidget({ onOpen }: { onOpen: () => void }) {
   const cxScale = cxFitScale(screenW, screenH);
 
   return (
-    <motion.button
-      type="button"
+    <motion.div
+      role="button"
+      tabIndex={0}
       onClick={onOpen}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onOpen(); }}
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.5, duration: 0.4, ease: 'easeOut' }}
@@ -1057,8 +1059,6 @@ export function CxAlloyWidget({ onOpen }: { onOpen: () => void }) {
         zIndex: 50,
         userSelect: 'none',
         overflow: 'visible',
-        background: 'none',
-        border: 'none',
       }}
     >
       <IpadDeviceShell
@@ -1081,6 +1081,6 @@ export function CxAlloyWidget({ onOpen }: { onOpen: () => void }) {
           </div>
         }
       />
-    </motion.button>
+    </motion.div>
   );
 }

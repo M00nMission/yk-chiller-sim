@@ -7,7 +7,6 @@ import { InspectRaycaster } from './components/canvas/InspectRaycaster';
 import { TechnicianController } from './components/canvas/TechnicianController';
 import { CxAlloyWidget, CxAlloyHtmlMaximized } from './components/ui/CxAlloyPanel';
 import { ControlPanelUI } from './components/ui/ControlPanelUI';
-import { useWalkModeStore } from './store/useWalkModeStore';
 import { LADDER, ROOF_WALK_Y } from './world/walkModeWorld';
 import { HMIPanel } from './components/ui/HMIPanel';
 import {
@@ -4233,8 +4232,6 @@ export default function App() {
   const hmiLookAtRef = useRef(new THREE.Vector3(0, 2.5, 0));
   const vfdLookAtRef = useRef(new THREE.Vector3(4.6, 2.2, -2.6));
   const panelZoom: HmiPanelZoomMode = zoomedVfd ? 'vfd' : zoomedHMI ? 'hmi' : 'none';
-  const walkMode = useWalkModeStore((s) => s.walkMode);
-
   // Keep browser page-zoom (Ctrl/Cmd + wheel, trackpad pinch) from scaling the chrome
   // (top bar, iPad widget). OrbitControls still receives the wheel event for dolly.
   useEffect(() => {
@@ -4262,10 +4259,6 @@ export default function App() {
     simulationEngine.start();
     return () => simulationEngine.stop();
   }, []);
-
-  // Note: in walk mode we deliberately let Esc fall through to the browser
-  // so it just releases pointer-lock (Minecraft-style "open menu"). The user
-  // exits walk mode via the top bar "Walk Mode" toggle.
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#9bd0ff', position: 'relative', overflow: 'hidden' }}>
@@ -4381,33 +4374,17 @@ export default function App() {
               vfdLookAtRef={vfdLookAtRef}
             />
 
-            {/* HVAC technician — when walk mode is on, drives a first-person
-                camera with arrows/WASD + Shift; mouse-look comes from
-                <PointerLockControls/> below. */}
-            <TechnicianController enabled={walkMode} spawnPosition={[10, 0, 12]} />
-
-            {walkMode ? (
-              <PointerLockControls makeDefault />
-            ) : (
-              <OrbitControls
-                makeDefault
-                target={CHILLER_ORBIT_TARGET}
-                minDistance={panelZoom !== 'none' ? 0.05 : 8}
-                maxDistance={panelZoom !== 'none' ? 5 : 150}
-                minPolarAngle={0.2}
-                maxPolarAngle={Math.PI / 2 - 0.1}
-                enableDamping
-                dampingFactor={0.05}
-                enabled={panelZoom === 'none'}
-              />
-            )}
+            {/* HVAC technician — first-person camera, WASD / Arrows to move,
+                Shift to run, mouse-look via PointerLockControls (click to lock,
+                Esc to release pointer-lock). */}
+            <TechnicianController enabled spawnPosition={[10, 0, 12]} />
+            <PointerLockControls makeDefault />
           </Suspense>
         </Canvas>
       </div>
 
-      {/* Centered crosshair (Minecraft-style reticle) — only in walk mode */}
-      {walkMode && (
-        <div
+      {/* Centered crosshair (Minecraft-style reticle) */}
+      <div
           aria-hidden
           style={{
             position: 'absolute',
@@ -4447,7 +4424,6 @@ export default function App() {
             }}
           />
         </div>
-      )}
 
       {/* Exit-zoom button — appears top-left when HMI is zoomed in.
           We deliberately DO NOT cover the screen with a click-shield, so

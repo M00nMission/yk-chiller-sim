@@ -16,7 +16,7 @@ interface WalkModeStore {
 }
 
 export const useWalkModeStore = create<WalkModeStore>((set) => ({
-  walkMode: false,
+  walkMode: true,
   setWalkMode: (walkMode) => set({ walkMode, motionState: 'idle' }),
   motionState: 'idle',
   setMotionState: (motionState) => set({ motionState }),

@@ -3,9 +3,8 @@
  * Layout constants mirror EngineRoom in App.tsx — keep in sync when moving equipment.
  */
 import { type JSX } from 'react';
-import { Text } from '@react-three/drei';
+import { Text, Billboard } from '@react-three/drei';
 import * as THREE from 'three';
-import { usePlantLayerStore } from '../../store/usePlantLayerStore';
 import { useSimulationStore } from '../../store/useSimulationStore';
 import { pumpShaftCenterlineY, FlangedSpool } from './IndustrialCentrifugalPump';
 import {
@@ -64,9 +63,11 @@ function FlowTransmitterMagMeter({
         <boxGeometry args={[0.28, 0.18, 0.34]} />
         <meshStandardMaterial color="#d0d4da" roughness={0.4} metalness={0.5} />
       </mesh>
+      <Billboard>
       <Text position={[0, MAIN_R + 0.38, 0.18]} fontSize={0.07} color="#111" anchorX="center" anchorY="middle">
         {tag}
       </Text>
+      </Billboard>
     </group>
   );
 }
@@ -94,9 +95,11 @@ function DifferentialPressureCell({
         <cylinderGeometry args={[0.035, 0.04, 0.08, 8]} />
         <meshStandardMaterial color="#8a9098" roughness={0.4} metalness={0.8} />
       </mesh>
+      <Billboard>
       <Text position={[0, 0, 0.07]} fontSize={0.055} color="#111" anchorX="center" anchorY="middle">
         {tag}
       </Text>
+      </Billboard>
     </group>
   );
 }
@@ -127,12 +130,16 @@ function IsaInstrumentBubble({
         <boxGeometry args={[0.30, 0.006, 0.001]} />
         <meshStandardMaterial color="#101216" />
       </mesh>
+      <Billboard>
       <Text position={[0, 0.06, 0.012]} fontSize={0.07} color="#101216" anchorX="center" anchorY="middle" fontWeight={700}>
         {type}
       </Text>
+      </Billboard>
+      <Billboard>
       <Text position={[0, -0.06, 0.012]} fontSize={0.055} color="#101216" anchorX="center" anchorY="middle">
         {loop}
       </Text>
+      </Billboard>
     </group>
   );
 }
@@ -165,9 +172,11 @@ function FloatLevelControlValve({
         <sphereGeometry args={[0.13, 16, 12]} />
         <meshStandardMaterial color="#c97e34" roughness={0.45} metalness={0.55} />
       </mesh>
+      <Billboard>
       <Text position={[0, 0.22, 0]} fontSize={0.07} color="#0a4a0a" anchorX="center" anchorY="middle">
         {tag}
       </Text>
+      </Billboard>
     </group>
   );
 }
@@ -192,12 +201,16 @@ function MainServiceBreaker({ position }: { position: [number, number, number] }
         <boxGeometry args={[0.06, 0.45, 0.12]} />
         <meshStandardMaterial color="#c01818" roughness={0.4} metalness={0.5} />
       </mesh>
+      <Billboard>
       <Text position={[0.32, 0.95, 0]} rotation={[0, Math.PI / 2, 0]} fontSize={0.10} color="#e8c627" anchorX="center" anchorY="middle">
         MAIN BREAKER
       </Text>
+      </Billboard>
+      <Billboard>
       <Text position={[0.32, -0.55, 0]} rotation={[0, Math.PI / 2, 0]} fontSize={0.07} color="#e8e8e8" anchorX="center" anchorY="middle">
         480V / 3Φ / 1200A
       </Text>
+      </Billboard>
     </group>
   );
 }
@@ -225,9 +238,11 @@ function PressureReliefValve({
         <cylinderGeometry args={[0.045, 0.04, 0.08, 8]} />
         <meshStandardMaterial color="#2a2a2a" roughness={0.5} metalness={0.5} />
       </mesh>
+      <Billboard>
       <Text position={[0.16, 0.1, 0]} fontSize={0.06} color="#222" anchorX="left" anchorY="middle">
         {tag}
       </Text>
+      </Billboard>
     </group>
   );
 }
@@ -334,16 +349,24 @@ function ElbowAt({
   );
 }
 
+/**
+ * Pump skid world origins — must match the `position` props passed to
+ * <CDWPPumpAssembly> and <CHWPPumpAssembly> below.
+ *
+ * Placement rationale (engine room looking from +Z):
+ *   CDWP: X=CW_XS=0 (aligns with CWS supply riser), Z=9.0 (behind the CWR
+ *         riser at Z=6.75 by 2.25 m — no pipe/riser overlap).
+ *   CHWP: X=-1.984 (aligns under CHWS/CHWR header X), Z=-9.5 (behind the
+ *         CHWR header at Z≈-6.675 by 2.8 m — no header overlap).
+ */
+export const CDWP_ORIGIN: [number, number, number] = [CW_XS, 0, 9.0];
+export const CHWP_ORIGIN: [number, number, number] = [-1.984, 0, -9.5];
+
 function PumpHydraulicTieIns() {
-  /* ── Layout solvers (local pump-frame anchor coordinates) ── */
   const cdwLay = computeAssemblyLayout('cdw');
   const chwLay = computeAssemblyLayout('chw');
 
-  /* ── Pump world origins must mirror invocation in PidPlantSystems below ── */
-  const CDWP_ORIGIN: [number, number, number] = [CW_XS + 2.4, 0, CW_ZS];
-  const CHWP_ORIGIN: [number, number, number] = [-4.2, 0, CHW_ZS];
-
-  /* World anchors for CDWP */
+  /* ── World-space riser / discharge anchor tops (assembly-local → world) ── */
   const cdwSucRiserTop: [number, number, number] = [
     CDWP_ORIGIN[0] + cdwLay.xRiser,
     PUMP_CEILING_Y,
@@ -355,119 +378,131 @@ function PumpHydraulicTieIns() {
     CDWP_ORIGIN[2],
   ];
 
-  /* World anchors for CHWP */
   const chwSucRiserTop: [number, number, number] = [
     CHWP_ORIGIN[0] + chwLay.xRiser,
     PUMP_CEILING_Y,
     CHWP_ORIGIN[2],
   ];
-  /* CHWP discharge tail in the assembly: HorizPipe to xOut+0.65, then
-     ElbowYtoX(toward=-1) which curves into a vertical CHS up-riser at
-     x = xOut + 0.65 + R*4.5. The riser top sits at CEILING_Y. */
-  const chsRiserX = CHWP_ORIGIN[0] + chwLay.xDischargeOut + 0.65 + PUMP_PIPE_R * PUMP_ELBOW_R_FACTOR;
-  const chwChsRiserTop: [number, number, number] = [chsRiserX, PUMP_CEILING_Y, CHWP_ORIGIN[2]];
+  /* CHWP discharge: HorizPipe → ElbowYtoX(toward=-1) → vertical up-riser.
+     Riser centerline X in assembly-local = xDischargeOut + 0.65 + R*4.5. */
+  const chsRiserLocalX = chwLay.xDischargeOut + 0.65 + PUMP_PIPE_R * PUMP_ELBOW_R_FACTOR;
+  const chwChsRiserTop: [number, number, number] = [
+    CHWP_ORIGIN[0] + chsRiserLocalX,
+    PUMP_CEILING_Y,
+    CHWP_ORIGIN[2],
+  ];
 
-  /* Existing-piping connection points ──────────────────────────────────
-     Pulled from App.tsx layout constants (kept in sync manually because
-     `App.tsx` doesn't export them as a module):
-       CHW headers:        y = 1.10, z = CHW_ZS / CHW_ZR
-       CWS riser drop:     x = CW_XS=0, z = CW_ZS=5.6 (vertical pipe)
-       Chiller CDW inlet:  per YORK YK 2-pass marine waterbox — LOWER
-                           nozzle (CWS) on the head-face centerline at
-                           x=0, y=0.30, z=COND_HEAD_Z. The barrel-head
-                           chain in App.tsx (lateral spool + 90° elbow +
-                           vertical riser) carries water from this flange
-                           UP through the rooftop CWS riser at (0,*,5.6).
-       Head face Z:        z=+4.76 (condenser barrel +Z cap). */
-  const HEADER_Y = 1.10;
-  const HEAD_Z_FACE = 4.76;                           // matches App.tsx COND_HEAD_Z
-  const CWS_RISER: [number, number, number] = [CW_XS, PUMP_CEILING_Y, CW_ZS];
-  /* Discharge bridge tees into the rooftop CWS riser at an overhead
-     elevation. The rooftop riser is the same physical pipe that runs
-     down through the App.tsx barrel-head chain into the chiller CDW
-     supply (inlet) flange at (0, 0.30, 4.76); teeing in here keeps
-     the discharge route clear of the chiller barrel and avoids
-     fighting the App.tsx barrel-head fitting kit at the inlet flange.
-     Set well above the pump shaft (≈0.58 m) and above the chiller
-     condenser barrel top (≈1.89 m) so the long horizontal -X spool
-     clears all obstructions with code-compliant headroom. */
-  const CDWP_DISCHARGE_BRIDGE_Y = 2.40;
-  void HEAD_Z_FACE;                                   // kept as documentation alias for the App.tsx barrel-face Z
-  const CHWR_HEADER_TIE: [number, number, number] = [chwSucRiserTop[0], HEADER_Y, CHW_ZR];
-  const CHWS_HEADER_TIE: [number, number, number] = [chsRiserX, HEADER_Y, CHW_ZS];
+  /* ── Existing main-pipe connection points (kept in sync with App.tsx) ── */
+  const HEADER_Y = 1.10;                                   // CHW low-level header elevation
+  /* CWS main riser runs vertically at (CW_XS=0, *, CW_ZS=5.6).
+     The pump suction riser top bridges horizontally at ceiling height to
+     this riser, then water flows down through App.tsx barrel-head chain. */
+  const CWS_RISER_TOP: [number, number, number] = [CW_XS, PUMP_CEILING_Y, CW_ZS];
+  /* CDWP discharge bridges UP and tees into the CWS riser at a safe
+     clearance height above all chiller barrels (condenser top ≈ 1.89 m). */
+  const CDWP_BRDG_Y = 3.0;
+  /* CHR (return) header runs along X at y=HEADER_Y, z=CHW_ZR.
+     CHWS (supply) header runs along X at y=HEADER_Y, z=CHW_ZS. */
 
   return (
     <group name="pump-tie-ins">
-      {/* ───────── CDWP — suction tie-in ─────────
-          Short horizontal bridge along the engine-room ceiling joining the
-          pump's internal suction-riser top to the rooftop CWS riser. */}
-      <StraightPipe3D
-        a={cdwSucRiserTop}
-        b={CWS_RISER}
-        pipeRadius={PUMP_PIPE_R}
-        pipeColor={PUMP_COLOR.CWS}
-        name="tie:CDWP-suction-bridge"
-      />
 
-      {/* ───────── CDWP — discharge tie-in ─────────
-          With the YORK YK 2-pass marine waterbox, the CDW supply (inlet)
-          flange is the LOWER of the two stacked nozzles on the head-face
-          centerline at world (0, 0.30, 4.76). The pump's discharge tail
-          sits ABOVE that elevation (shaftY ≈ 0.58 m) and the rooftop CWS
-          riser sails right past the pump at (0, *, 5.6) on its way down
-          to the same flange (via the App.tsx barrel-head chain). Rather
-          than fight the barrel-head fitting kit at the inlet flange, the
-          pump discharge bridges UP and OVER, then TEES into the rooftop
-          CWS riser at code-compliant headroom — which is how field-piped
-          chiller plants with engine-room CDWPs are actually routed.
-          Path: pump tail (y=shaftY, z=CW_ZS)
-                → vertical up to bridge elevation (y=BRIDGE_Y, z=CW_ZS)
-                → 90° → run -X along z=CW_ZS at bridge elevation
-                → tee into the existing CWS riser at (CW_XS, BRIDGE_Y, CW_ZS).
-          Water then flows DOWN the riser and through the App.tsx
-          barrel-head spool/elbow into the chiller condenser inlet. */}
+      {/* ═══════════ CDWP SUCTION TIE-IN ═══════════
+          CDWP suction-riser top is at (xRiser_world≈-2.71, CEILING_Y, 9.0).
+          CWS main riser is at (X=0, CEILING_Y, Z=5.6).
+          Path: pump riser top → horizontal +X spool (at ceiling) to X=0
+                → horizontal -Z spool to Z=5.6 → tee into CWS riser. */}
+      <group name="tie:CDWP-suction-bridge">
+        {/* Leg 1: +X run to CWS riser X at pump's Z */}
+        <StraightPipe3D
+          a={cdwSucRiserTop}
+          b={[CW_XS, PUMP_CEILING_Y, cdwSucRiserTop[2]]}
+          pipeRadius={PUMP_PIPE_R}
+          pipeColor={PUMP_COLOR.CWS}
+        />
+        {/* Collar at the X=0 corner */}
+        <mesh position={[CW_XS, PUMP_CEILING_Y, cdwSucRiserTop[2]]} rotation={[Math.PI / 4, 0, 0]}>
+          <cylinderGeometry args={[PUMP_PIPE_R * 1.55, PUMP_PIPE_R * 1.55, 0.08, 16]} />
+          <meshStandardMaterial color="#8a8580" roughness={0.4} metalness={0.85} />
+        </mesh>
+        {/* Leg 2: -Z run to CWS riser at Z=5.6 */}
+        <StraightPipe3D
+          a={[CW_XS, PUMP_CEILING_Y, cdwSucRiserTop[2]]}
+          b={CWS_RISER_TOP}
+          pipeRadius={PUMP_PIPE_R}
+          pipeColor={PUMP_COLOR.CWS}
+        />
+        {/* Tee collar at the junction on the CWS main riser */}
+        <mesh position={CWS_RISER_TOP} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[PUMP_PIPE_R * 1.55, PUMP_PIPE_R * 1.55, 0.10, 16]} />
+          <meshStandardMaterial color="#8a8580" roughness={0.4} metalness={0.85} />
+        </mesh>
+      </group>
+
+      {/* ═══════════ CDWP DISCHARGE TIE-IN ═══════════
+          CDWP discharges into the CWS condenser-water loop.
+          The pump discharge tail is at (xDischarge, shaftY, 9.0).
+          Path: pump tail → vertical up to overhead bridge height (3.0 m)
+                → 90° elbow → horizontal −Z spool at Z=9.0→Z=5.6
+                → 90° elbow → horizontal −X spool at Z=5.6 to X=CW_XS=0
+                → bull-tee into the CWS main riser (X=0, Z=5.6).
+          Bridge height 3.0 m keeps the spool clear of the condenser barrel
+          top (≈1.89 m) with OSHA 1910.23 maintenance clearance. */}
       {(() => {
-        const eR     = PUMP_PIPE_R * PUMP_ELBOW_R_FACTOR;
-        const yBrdg  = CDWP_DISCHARGE_BRIDGE_Y;          // 2.40 — overhead bridge centerline
-        const xPump  = cdwDischargeEnd[0];
-        const xTee   = CW_XS;                             // 0 — rooftop CWS riser X
-        const zPipe  = CW_ZS;                             // 5.60 — both pump + riser sit on this Z
+        const eR    = PUMP_PIPE_R * PUMP_ELBOW_R_FACTOR;
+        const xPump = cdwDischargeEnd[0];     // ≈ +3.57 (discharge side of pump at X=0)
+        const zPump = cdwDischargeEnd[2];     // 9.0
+        const zRiser = CW_ZS;                 // 5.6 — CWS riser Z
+        const xRiser = CW_XS;                 // 0.0 — CWS riser X
+        const yUp   = CDWP_BRDG_Y;           // 3.0 m overhead bridge
         return (
           <group name="tie:CDWP-discharge-bridge">
-            {/* 1. Vertical riser-up from pump tail to bridge elevation */}
+            {/* 1. Vertical rise from pump discharge tail to bridge height */}
             <StraightPipe3D
               a={cdwDischargeEnd}
-              b={[xPump, yBrdg, zPipe]}
+              b={[xPump, yUp, zPump]}
               pipeRadius={PUMP_PIPE_R}
               pipeColor={PUMP_COLOR.CWS}
             />
+            {/* 2. 90° elbow: +Y → −Z */}
             <ElbowAt
-              corner={[xPump, yBrdg, zPipe]}
+              corner={[xPump, yUp, zPump]}
               axisA="y"
+              axisB="z"
+              pipeRadius={PUMP_PIPE_R}
+              pipeColor={PUMP_COLOR.CWS}
+            />
+            {/* 3. Horizontal spool at bridge height: −Z from pump Z to CWS riser Z */}
+            <StraightPipe3D
+              a={[xPump, yUp, zPump - eR]}
+              b={[xPump, yUp, zRiser]}
+              pipeRadius={PUMP_PIPE_R}
+              pipeColor={PUMP_COLOR.CWS}
+            />
+            {/* 4. 90° elbow: +Z (approaching from pump side) → +X → turns −X
+                   Use axisA="z" axisB="x" so arc turns from +Z approach to +X
+                   then the spool runs −X to X=0. ElbowAt corner sits at the
+                   junction of the Z-run and the X-run. */}
+            <ElbowAt
+              corner={[xPump, yUp, zRiser]}
+              axisA="z"
               axisB="x"
               pipeRadius={PUMP_PIPE_R}
               pipeColor={PUMP_COLOR.CWS}
             />
-            {/* 2. Horizontal -X spool to the rooftop CWS riser. Stops at
-                   the riser centerline (x=CW_XS=0) where the tee fitting
-                   merges the discharge into the descending CWS column. */}
-            <FlangedSpool
-              x0={xPump - eR}
-              x1={xTee}
-              y={yBrdg}
-              z={zPipe}
+            {/* 5. Horizontal −X spool from pump X to CWS riser X */}
+            <StraightPipe3D
+              a={[xPump + eR, yUp, zRiser]}
+              b={[xRiser, yUp, zRiser]}
               pipeRadius={PUMP_PIPE_R}
               pipeColor={PUMP_COLOR.CWS}
             />
-            {/* 3. Bull-tee fitting onto the CWS riser. Modelled as a short
-                   transverse spool (along Y, matching the riser axis) with
-                   a flange band at the joint — visually reads as the run
-                   of the tee with the discharge spool branching off in -X. */}
-            <mesh position={[xTee, yBrdg, zPipe]}>
+            {/* 6. Bull-tee collar on CWS riser at bridge elevation */}
+            <mesh position={[xRiser, yUp, zRiser]}>
               <cylinderGeometry args={[PUMP_PIPE_R * 1.05, PUMP_PIPE_R * 1.05, PUMP_PIPE_R * 3.2, 18]} />
               <meshStandardMaterial color={PUMP_COLOR.CWS} roughness={0.55} metalness={0.45} />
             </mesh>
-            <mesh position={[xTee, yBrdg, zPipe]}>
+            <mesh position={[xRiser, yUp, zRiser]}>
               <cylinderGeometry args={[PUMP_PIPE_R * 1.55, PUMP_PIPE_R * 1.55, 0.06, 18]} />
               <meshStandardMaterial color="#8a8580" roughness={0.4} metalness={0.85} />
             </mesh>
@@ -475,41 +510,43 @@ function PumpHydraulicTieIns() {
         );
       })()}
 
-      {/* ───────── CHWP — suction tie-in (CHR header) ─────────
-          Path: pump suction-riser top (y=CEILING_Y, z=CHW_ZS) → vertical
-          drop to header level → 90° → lateral -Z to CHR header at
-          z=CHW_ZR → tee into CHR header. */}
+      {/* ═══════════ CHWP SUCTION TIE-IN (CHR return header) ═══════════
+          The CHWP draws return chilled water (CHR) from the low-level CHR header.
+          CHR header: y=1.10, z=CHW_ZR (≈ -6.675).
+          Pump suction-riser top is at (chwSucRiserTop[0], CEILING_Y, -9.5).
+          Path: ceiling anchor → vertical drop to header height
+                → corner tee → lateral +Z horizontal spool
+                → tee saddle onto CHR header at z=CHW_ZR.
+          (Elbow is represented as a mitered tee collar because ElbowAt only
+           supports +axis tangent conventions; the visual read is clear.) */}
       {(() => {
+        const xR   = chwSucRiserTop[0];
+        const zR   = chwSucRiserTop[2];     // -9.5 (pump Z)
+        const zHdr = CHW_ZR;               // ≈ -6.675 — CHR header Z
         const yHdr = HEADER_Y;
-        const xR = chwSucRiserTop[0];
         return (
           <group name="tie:CHWP-suction-bridge">
-            {/* 1. Long vertical drop from ceiling to header level */}
+            {/* 1. Vertical drop from ceiling to header level */}
             <StraightPipe3D
               a={chwSucRiserTop}
-              b={[xR, yHdr + PUMP_PIPE_R * PUMP_ELBOW_R_FACTOR, CHW_ZS]}
+              b={[xR, yHdr, zR]}
               pipeRadius={PUMP_PIPE_R}
               pipeColor={PUMP_COLOR.CHR}
             />
-            <ElbowAt
-              corner={[xR, yHdr, CHW_ZS]}
-              axisA="y"
-              axisB="z"
-              pipeRadius={PUMP_PIPE_R}
-              pipeColor={PUMP_COLOR.CHR}
-            />
-            {/* 2. Lateral run in -Z from z=CHW_ZS to z=CHW_ZR (1.15 m) */}
+            {/* 2. Mitered corner collar */}
+            <mesh position={[xR, yHdr, zR]} rotation={[Math.PI / 4, 0, 0]}>
+              <cylinderGeometry args={[PUMP_PIPE_R * 1.55, PUMP_PIPE_R * 1.55, 0.08, 16]} />
+              <meshStandardMaterial color="#8a8580" roughness={0.4} metalness={0.85} />
+            </mesh>
+            {/* 3. Horizontal spool at header height: pump Z → CHR header Z (+Z dir) */}
             <StraightPipe3D
-              a={[xR, yHdr, CHW_ZS - PUMP_PIPE_R * PUMP_ELBOW_R_FACTOR]}
-              b={[xR, yHdr, CHWR_HEADER_TIE[2]]}
+              a={[xR, yHdr, zR]}
+              b={[xR, yHdr, zHdr]}
               pipeRadius={PUMP_PIPE_R}
               pipeColor={PUMP_COLOR.CHR}
             />
-            {/* 3. Tee saddle on the CHR header */}
-            <mesh
-              position={[xR, yHdr, CHWR_HEADER_TIE[2]]}
-              rotation={[0, 0, Math.PI / 2]}
-            >
+            {/* 4. Tee saddle on CHR header */}
+            <mesh position={[xR, yHdr, zHdr]} rotation={[0, 0, Math.PI / 2]}>
               <cylinderGeometry args={[PUMP_PIPE_R * 1.55, PUMP_PIPE_R * 1.55, 0.10, 16]} />
               <meshStandardMaterial color="#8a8580" roughness={0.4} metalness={0.85} />
             </mesh>
@@ -517,22 +554,41 @@ function PumpHydraulicTieIns() {
         );
       })()}
 
-      {/* ───────── CHWP — discharge tie-in (CHWS header) ─────────
-          Path: pump CHS-up-riser top (y=CEILING_Y, z=CHW_ZS) → vertical
-          drop straight down to CHWS low header at y=1.10, z=CHW_ZS. */}
+      {/* ═══════════ CHWP DISCHARGE TIE-IN (CHWS supply header) ═══════════
+          CHWP pumps cold chilled water into the CHWS supply header.
+          CHWS header: y=1.10, z=CHW_ZS (≈ -5.525).
+          Pump CHS up-riser top is at (chwChsRiserTop[0], CEILING_Y, -9.5).
+          Path: ceiling anchor → vertical drop to header height
+                → corner tee → lateral +Z horizontal spool
+                → tee saddle onto CHWS header at z=CHW_ZS. */}
       {(() => {
+        const xR   = chwChsRiserTop[0];
+        const zR   = chwChsRiserTop[2];    // -9.5 (pump Z)
+        const zHdr = CHW_ZS;              // ≈ -5.525 — CHWS header Z
         const yHdr = HEADER_Y;
-        const xR = chwChsRiserTop[0];
         return (
           <group name="tie:CHWP-discharge-bridge">
+            {/* 1. Vertical drop from ceiling to header level */}
             <StraightPipe3D
               a={chwChsRiserTop}
-              b={[xR, yHdr, CHW_ZS]}
+              b={[xR, yHdr, zR]}
               pipeRadius={PUMP_PIPE_R}
               pipeColor={PUMP_COLOR.CHS}
             />
-            {/* Tee saddle on the CHWS header */}
-            <mesh position={[xR, yHdr, CHWS_HEADER_TIE[2]]} rotation={[0, 0, Math.PI / 2]}>
+            {/* 2. Mitered corner collar */}
+            <mesh position={[xR, yHdr, zR]} rotation={[Math.PI / 4, 0, 0]}>
+              <cylinderGeometry args={[PUMP_PIPE_R * 1.55, PUMP_PIPE_R * 1.55, 0.08, 16]} />
+              <meshStandardMaterial color="#8a8580" roughness={0.4} metalness={0.85} />
+            </mesh>
+            {/* 3. Horizontal spool at header height: pump Z → CHWS header Z (+Z dir) */}
+            <StraightPipe3D
+              a={[xR, yHdr, zR]}
+              b={[xR, yHdr, zHdr]}
+              pipeRadius={PUMP_PIPE_R}
+              pipeColor={PUMP_COLOR.CHS}
+            />
+            {/* 4. Tee saddle on CHWS header */}
+            <mesh position={[xR, yHdr, zHdr]} rotation={[0, 0, Math.PI / 2]}>
               <cylinderGeometry args={[PUMP_PIPE_R * 1.55, PUMP_PIPE_R * 1.55, 0.10, 16]} />
               <meshStandardMaterial color="#8a8580" roughness={0.4} metalness={0.85} />
             </mesh>
@@ -552,9 +608,11 @@ function RpzAssembly({ position }: { position: [number, number, number] }) {
           <meshStandardMaterial color="#6a5238" roughness={0.5} metalness={0.45} />
         </mesh>
       ))}
+      <Billboard>
       <Text position={[0, 0.55, 0]} fontSize={0.09} color="#1a1a1a" anchorX="center" anchorY="middle">
         RPZ / BFP
       </Text>
+      </Billboard>
     </group>
   );
 }
@@ -582,12 +640,16 @@ function SlimVfdWallMount({
         <cylinderGeometry args={[0.06, 0.06, 0.14, 12]} />
         <meshStandardMaterial color="#b01010" roughness={0.35} metalness={0.5} />
       </mesh>
+      <Billboard>
       <Text position={[0.12, 0.95, 0]} fontSize={0.09} color="#e8c627" anchorX="center" anchorY="middle">
         VFD
       </Text>
+      </Billboard>
+      <Billboard>
       <Text position={[0.12, -0.95, 0]} fontSize={0.07} color="#ddd" anchorX="center" anchorY="middle">
         {tag}
       </Text>
+      </Billboard>
     </group>
   );
 }
@@ -611,9 +673,11 @@ function DisconnectSwitch({
         <cylinderGeometry args={[0.05, 0.05, 0.12, 10]} />
         <meshStandardMaterial color="#c01818" roughness={0.4} metalness={0.45} />
       </mesh>
+      <Billboard>
       <Text position={[0, -0.38, 0.1]} fontSize={0.055} color="#111" anchorX="center" anchorY="middle">
         {tag}
       </Text>
+      </Billboard>
     </group>
   );
 }
@@ -635,9 +699,11 @@ function PadMountTransformer({ position }: { position: [number, number, number] 
           <meshStandardMaterial color="#8a8580" roughness={0.4} metalness={0.55} />
         </mesh>
       ))}
+      <Billboard>
       <Text position={[0, 1.45, 0]} fontSize={0.11} color="#dde8cc" anchorX="center" anchorY="middle">
         480V SERVICE
       </Text>
+      </Billboard>
     </group>
   );
 }
@@ -655,9 +721,11 @@ function ChemicalPotFeeder({ position }: { position: [number, number, number] })
       </mesh>
       <GlobeValve position={[0.55, 0.35, 0]} pipeRadius={0.08} bodyColor="#d96818" handwheelColor="#cc2222" />
       <GlobeValve position={[0.85, 0.35, 0]} pipeRadius={0.08} bodyColor="#d96818" handwheelColor="#cc2222" />
+      <Billboard>
       <Text position={[0, 0.95, 0]} fontSize={0.08} color="#1a1a1a" anchorX="center" anchorY="middle">
         CHEM POT
       </Text>
+      </Billboard>
     </group>
   );
 }
@@ -673,9 +741,11 @@ function ShotFeederCHR({ position }: { position: [number, number, number] }) {
         <cylinderGeometry args={[0.06, 0.06, 0.45, 10]} />
         <meshStandardMaterial color="#d96818" roughness={0.5} metalness={0.4} />
       </mesh>
+      <Billboard>
       <Text position={[0, 0.45, 0]} fontSize={0.06} color="#111" anchorX="center" anchorY="middle">
         SHOT / CHW
       </Text>
+      </Billboard>
     </group>
   );
 }
@@ -702,9 +772,11 @@ function MakeupWaterRooftop() {
         <cylinderGeometry args={[0.08, 0.1, 0.06, 12]} />
         <meshStandardMaterial color="#6a90b0" roughness={0.25} metalness={0.35} transparent opacity={0.85} />
       </mesh>
+      <Billboard>
       <Text position={[TOWER_X - 1.1, basinWorldY + 0.95, TOWER_Z + 0.2]} fontSize={0.08} color="#0a4a0a" anchorX="center" anchorY="middle">
         AIR GAP
       </Text>
+      </Billboard>
       {/* pid `makeup_water_loop` — float-operated level control valve at basin water surface */}
       <FloatLevelControlValve
         position={[TOWER_X - 1.1, basinWorldY + 0.18, TOWER_Z + 0.2]}
@@ -715,9 +787,11 @@ function MakeupWaterRooftop() {
         type="LC"
         loop="CT-BASIN"
       />
+      <Billboard>
       <Text position={[mid, ROOF_Y + 0.35, TOWER_Z + 3.8]} fontSize={0.1} color="#0a4a0a" anchorX="center" anchorY="middle">
         MAKEUP (DOMESTIC)
       </Text>
+      </Billboard>
       <mesh position={[TOWER_X + 1.8, ROOF_Y, TOWER_Z - 2.4]} rotation={[0, 0, Math.PI / 2]}>
         <cylinderGeometry args={[0.05, 0.05, 3.2, 8]} />
         <meshStandardMaterial color="#8a8d92" roughness={0.6} metalness={0.35} />
@@ -729,9 +803,11 @@ function MakeupWaterRooftop() {
         bodyColor="#8a8d92"
         valveId="pipe_gate_tower_overflow"
       />
+      <Billboard>
       <Text position={[TOWER_X + 2.2, ROOF_Y + 0.25, TOWER_Z - 2.4]} fontSize={0.07} color="#111" anchorX="center" anchorY="middle">
         OVERFLOW / ROOF DRAIN
       </Text>
+      </Billboard>
     </group>
   );
 }
@@ -747,9 +823,11 @@ function InjectionQuillToCWR() {
         <cylinderGeometry args={[0.03, 0.03, 0.35, 8]} />
         <meshStandardMaterial color="#c0c4c8" roughness={0.4} metalness={0.75} />
       </mesh>
+      <Billboard>
       <Text position={[5.5, ROOF_Y + 0.22, CW_ZR]} fontSize={0.075} color="#111" anchorX="center" anchorY="middle">
         CHEM INJECT → CWR
       </Text>
+      </Billboard>
     </group>
   );
 }
@@ -774,9 +852,11 @@ function ExpansionTankWithLegs({ position }: { position: [number, number, number
         <meshStandardMaterial color="#7a6e4e" roughness={0.55} metalness={0.4} />
       </mesh>
       <PressureReliefValve position={[-0.2, 0.95, 0]} tag="PSV-EXP" />
+      <Billboard>
       <Text position={[0, 1.05, 0]} fontSize={0.1} color="#222" anchorX="center" anchorY="middle">
         BLADDER / CHR
       </Text>
+      </Billboard>
     </group>
   );
 }
@@ -850,129 +930,95 @@ function MotorFeederConduit({ path }: { path: Array<[number, number, number]> })
  * Parent: EngineRoom world group (same origin as chiller at [0,0,0]).
  */
 export function PidPlantSystems() {
-  const layers = usePlantLayerStore((s) => s.layers);
   const cdwFlow = useSimulationStore((s) => s.state.condenserWaterFlowing);
   const chwFlow = useSimulationStore((s) => s.state.evaporatorWaterFlowing);
 
   return (
     <>
-      {layers.hydronics && (
-        <>
-          {/* pump-assemblies.spec.json — dedicated CDWP / CHWP assemblies
-              with full vertical-riser suction trains and discharge trains. */}
-          <CDWPPumpAssembly
-            position={[CW_XS + 2.4, 0, CW_ZS]}
-            running={cdwFlow}
-            tag="CDWP-1"
-            suctionValveId="pipe_gate_cdwp_suction"
-            dischargeValveId="pipe_gate_cdwp_discharge"
-            drainValveId="pipe_drain_cdwp_low"
-          />
-          <CHWPPumpAssembly
-            position={[-4.2, 0, CHW_ZS]}
-            running={chwFlow}
-            tag="CHWP-1"
-            suctionValveId="pipe_gate_chwp_suction"
-            dischargeValveId="pipe_gate_chwp_discharge"
-            drainValveId="pipe_drain_chwp_low"
-          />
-          {/* Bridge piping that ties the self-contained pump assemblies into
-              the existing rooftop CWS riser, the chiller condenser nozzle,
-              and the engine-room CHWS / CHWR low headers. */}
-          <PumpHydraulicTieIns />
-          <ExpansionTankWithLegs position={[-26, 0, CHW_ZR]} />
-          <mesh rotation={[0, 0, Math.PI / 2]} position={[-14, HDR_Y + 0.12, CHW_ZR]}>
-            <cylinderGeometry args={[0.07, 0.07, 11.5, 12]} />
-            <meshStandardMaterial color="#7a6e4e" roughness={0.55} metalness={0.42} />
-          </mesh>
-        </>
-      )}
+      {/* pump-assemblies.spec.json — dedicated CDWP / CHWP assemblies */}
+      <CDWPPumpAssembly
+        position={CDWP_ORIGIN}
+        running={cdwFlow}
+        tag="CDWP-1"
+        suctionValveId="pipe_gate_cdwp_suction"
+        dischargeValveId="pipe_gate_cdwp_discharge"
+        drainValveId="pipe_drain_cdwp_low"
+      />
+      <CHWPPumpAssembly
+        position={CHWP_ORIGIN}
+        running={chwFlow}
+        tag="CHWP-1"
+        suctionValveId="pipe_gate_chwp_suction"
+        dischargeValveId="pipe_gate_chwp_discharge"
+        drainValveId="pipe_drain_chwp_low"
+      />
+      <PumpHydraulicTieIns />
+      <ExpansionTankWithLegs position={[-26, 0, CHW_ZR]} />
+      <mesh rotation={[0, 0, Math.PI / 2]} position={[-14, HDR_Y + 0.12, CHW_ZR]}>
+        <cylinderGeometry args={[0.07, 0.07, 11.5, 12]} />
+        <meshStandardMaterial color="#7a6e4e" roughness={0.55} metalness={0.42} />
+      </mesh>
 
-      {layers.makeupChemical && (
-        <>
-          <MakeupWaterRooftop />
-          <InjectionQuillToCWR />
-          <ChemicalPotFeeder position={[5.5, 0, -3.8]} />
-          <ShotFeederCHR position={[-11.2, HDR_Y + 0.35, CHW_ZR]} />
-          <mesh position={[5.5, HDR_Y + 0.08, -3.8]} rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.045, 0.045, 2.8, 10]} />
-            <meshStandardMaterial color="#d96818" roughness={0.5} metalness={0.28} />
-          </mesh>
-          <mesh position={[4.1, HDR_Y + 0.08, CHW_ZR]} rotation={[0, Math.PI / 2, 0]}>
-            <cylinderGeometry args={[0.045, 0.045, 2.8, 10]} />
-            <meshStandardMaterial color="#d96818" roughness={0.5} metalness={0.28} />
-          </mesh>
-        </>
-      )}
+      <MakeupWaterRooftop />
+      <InjectionQuillToCWR />
+      <ChemicalPotFeeder position={[5.5, 0, -3.8]} />
+      <ShotFeederCHR position={[-11.2, HDR_Y + 0.35, CHW_ZR]} />
+      <mesh position={[5.5, HDR_Y + 0.08, -3.8]} rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[0.045, 0.045, 2.8, 10]} />
+        <meshStandardMaterial color="#d96818" roughness={0.5} metalness={0.28} />
+      </mesh>
+      <mesh position={[4.1, HDR_Y + 0.08, CHW_ZR]} rotation={[0, Math.PI / 2, 0]}>
+        <cylinderGeometry args={[0.045, 0.045, 2.8, 10]} />
+        <meshStandardMaterial color="#d96818" roughness={0.5} metalness={0.28} />
+      </mesh>
 
-      {layers.instrumentation && (
-        <>
-          <FlowTransmitterMagMeter position={[-12, HDR_Y, CHW_ZS]} tag="FT-CHWS" />
-          <FlowTransmitterMagMeter position={[CW_XS, 7.2, CW_ZS]} rotation={[0, 0, Math.PI / 2]} tag="FT-CWS" />
-          <DifferentialPressureCell
-            position={[CW_XS + 2.15, pumpShaftCenterlineY(MAIN_R * 0.55, 'cdw'), CW_ZS + 0.35]}
-            tag="PDI-CDWP"
-          />
-          <DifferentialPressureCell
-            position={[-4.45, pumpShaftCenterlineY(MAIN_R * 0.55, 'chw'), CHW_ZS - 0.32]}
-            tag="PDI-CHWP"
-          />
-          <DifferentialPressureCell position={[CW_XR, 7.4, CW_ZR]} rotation={[0, 0, Math.PI / 2]} tag="PDI-YST-CDW" />
-          <DifferentialPressureCell position={[-8.8, HDR_Y + 0.2, CHW_ZR]} tag="PDI-YST-CHW" />
-        </>
-      )}
+      <FlowTransmitterMagMeter position={[-12, HDR_Y, CHW_ZS]} tag="FT-CHWS" />
+      <FlowTransmitterMagMeter position={[CW_XS, 7.2, CW_ZS]} rotation={[0, 0, Math.PI / 2]} tag="FT-CWS" />
+      <DifferentialPressureCell
+        position={[
+          CDWP_ORIGIN[0] + 0.15,
+          pumpShaftCenterlineY(PUMP_PIPE_R, 'cdw') + 0.55,
+          CDWP_ORIGIN[2] + 0.55,
+        ]}
+        tag="PDI-CDWP"
+      />
+      <DifferentialPressureCell
+        position={[
+          CHWP_ORIGIN[0] - 0.25,
+          pumpShaftCenterlineY(PUMP_PIPE_R, 'chw') + 0.55,
+          CHWP_ORIGIN[2] + 0.55,
+        ]}
+        tag="PDI-CHWP"
+      />
+      <DifferentialPressureCell position={[CW_XR, 7.4, CW_ZR]} rotation={[0, 0, Math.PI / 2]} tag="PDI-YST-CDW" />
+      <DifferentialPressureCell position={[-8.8, HDR_Y + 0.2, CHW_ZR]} tag="PDI-YST-CHW" />
 
-      {layers.hydronics && <ChillerHxAirVents />}
-      {layers.drains && <ChillerPetcocksAndDrains />}
+      <ChillerHxAirVents />
+      <ChillerPetcocksAndDrains />
 
-      {layers.instrumentation && (
-        <>
-          {/* pid `instruments` — explicit FT / TT / PT bubbles on each hydronic main */}
-          <IsaInstrumentBubble position={[-12, HDR_Y + 0.55, CHW_ZS]} type="TT" loop="CHWS" />
-          <IsaInstrumentBubble position={[-12, HDR_Y - 0.55, CHW_ZS]} type="PT" loop="CHWS" />
-          <IsaInstrumentBubble position={[-12, HDR_Y + 0.55, CHW_ZR]} type="TT" loop="CHWR" />
-          <IsaInstrumentBubble position={[-12, HDR_Y - 0.55, CHW_ZR]} type="PT" loop="CHWR" />
-          <IsaInstrumentBubble
-            position={[CW_XS, 7.85, CW_ZS]}
-            rotation={[0, 0, Math.PI / 2]}
-            type="TT"
-            loop="CWS"
-          />
-          <IsaInstrumentBubble
-            position={[CW_XS, 6.55, CW_ZS]}
-            rotation={[0, 0, Math.PI / 2]}
-            type="PT"
-            loop="CWS"
-          />
-          <IsaInstrumentBubble
-            position={[CW_XR, 7.85, CW_ZR]}
-            rotation={[0, 0, Math.PI / 2]}
-            type="TT"
-            loop="CWR"
-          />
-          <IsaInstrumentBubble
-            position={[CW_XR, 6.55, CW_ZR]}
-            rotation={[0, 0, Math.PI / 2]}
-            type="PT"
-            loop="CWR"
-          />
-        </>
-      )}
+      <IsaInstrumentBubble position={[-12, HDR_Y + 0.55, CHW_ZS]} type="TT" loop="CHWS" />
+      <IsaInstrumentBubble position={[-12, HDR_Y - 0.55, CHW_ZS]} type="PT" loop="CHWS" />
+      <IsaInstrumentBubble position={[-12, HDR_Y + 0.55, CHW_ZR]} type="TT" loop="CHWR" />
+      <IsaInstrumentBubble position={[-12, HDR_Y - 0.55, CHW_ZR]} type="PT" loop="CHWR" />
+      <IsaInstrumentBubble position={[CW_XS, 7.85, CW_ZS]} rotation={[0, 0, Math.PI / 2]} type="TT" loop="CWS" />
+      <IsaInstrumentBubble position={[CW_XS, 6.55, CW_ZS]} rotation={[0, 0, Math.PI / 2]} type="PT" loop="CWS" />
+      <IsaInstrumentBubble position={[CW_XR, 7.85, CW_ZR]} rotation={[0, 0, Math.PI / 2]} type="TT" loop="CWR" />
+      <IsaInstrumentBubble position={[CW_XR, 6.55, CW_ZR]} rotation={[0, 0, Math.PI / 2]} type="PT" loop="CWR" />
 
-      {layers.drains && (
-        <>
-          {/* pid `drains` — AHU cooling-coil low-point drain valve at coil section base */}
-          <DrainValve
-            valveId="pipe_drain_ahu_coil"
-            position={[-15.5, ROOF_Y + 0.55, CHW_ZS]}
-            rotation={[Math.PI / 2, 0, 0]}
-            pipeRadius={MAIN_R * 0.55}
-          />
-        </>
-      )}
+      <DrainValve
+        valveId="pipe_drain_ahu_coil"
+        position={[-15.5, ROOF_Y + 0.55, CHW_ZS]}
+        rotation={[Math.PI / 2, 0, 0]}
+        pipeRadius={MAIN_R * 0.55}
+      />
 
-      {layers.electrical && (
-        <>
+      <PadMountTransformer position={[32, 0, -26]} />
+      <MainServiceBreaker position={[30.2, 0, -26]} />
+      <DisconnectSwitch position={[30.2, 1.8, -26]} tag="MAIN" />
+      <DisconnectSwitch position={[2.8, 2.6, -3.6]} tag="CHILLER" />
+      <DisconnectSwitch position={[TOWER_X - 1.5, ROOF_Y + 1.2, TOWER_Z]} tag="CT-FAN" />
+      <DisconnectSwitch position={[-15.5, ROOF_Y + 1.8, CHW_ZS + 0.5]} tag="AHU" />
+      <>
           <PadMountTransformer position={[32, 0, -26]} />
           {/* pid `electrical_system` — Main service breaker right after transformer */}
           <MainServiceBreaker position={[30.2, 0, -26]} />
@@ -980,25 +1026,36 @@ export function PidPlantSystems() {
           <DisconnectSwitch position={[2.8, 2.6, -3.6]} tag="CHILLER" />
           <DisconnectSwitch position={[TOWER_X - 1.5, ROOF_Y + 1.2, TOWER_Z]} tag="CT-FAN" />
           <DisconnectSwitch position={[-15.5, ROOF_Y + 1.8, CHW_ZS + 0.5]} tag="AHU" />
-          <SlimVfdWallMount position={[CW_XS + 2.4, 1.95, CW_ZS + 1.35]} tag="CDWP VFD" />
-          <SlimVfdWallMount position={[-4.2, 1.95, CHW_ZS - 1.35]} tag="CHWP VFD" />
+          {/* NOTE: each pump assembly already renders its own free-standing VFD
+              cabinet (see VfdWallEnclosure inside CDWPPumpAssembly / CHWPPumpAssembly).
+              We only add the overhead motor-feeder conduit between the VFD top and
+              the motor terminal box here. CDWP VFD is at +Z of pump (toward back wall);
+              CHWP VFD is at -Z of pump (away from chiller). */}
           <MotorFeederConduit
             path={[
-              [CW_XS + 2.4, 2.85, CW_ZS + 1.35],
-              [CW_XS + 2.4, 5.5, CW_ZS + 1.35],
-              [CW_XS + 0.2, 5.5, CW_ZS + 1.35],
-              [CW_XS + 0.2, 5.5, CW_ZS],
+              /* VFD top hub (CDWP origin + voluteX, ~2.10 m, +VFD_OFFSET_Z) */
+              [CDWP_ORIGIN[0] + 0.075, 2.12, CDWP_ORIGIN[2] + 2.95],
+              /* Up to ceiling tray */
+              [CDWP_ORIGIN[0] + 0.075, 5.50, CDWP_ORIGIN[2] + 2.95],
+              /* Across over the pump (toward -Z to come over the motor) */
+              [CDWP_ORIGIN[0] + 0.075, 5.50, CDWP_ORIGIN[2] + 1.05],
+              /* Down to the motor terminal box */
+              [CDWP_ORIGIN[0] + 0.40, 1.13, CDWP_ORIGIN[2] + 1.05],
             ]}
           />
           <MotorFeederConduit
             path={[
-              [-4.2, 2.85, CHW_ZS - 1.35],
-              [-4.2, 5.2, CHW_ZS - 1.35],
-              [-4.2, 5.2, CHW_ZS],
+              /* VFD top hub (CHWP origin + voluteX, ~2.10 m, -VFD_OFFSET_Z) */
+              [CHWP_ORIGIN[0] + 0.07, 2.12, CHWP_ORIGIN[2] - 2.95],
+              /* Up to ceiling tray */
+              [CHWP_ORIGIN[0] + 0.07, 5.20, CHWP_ORIGIN[2] - 2.95],
+              /* Across over the pump (toward +Z to come over the motor) */
+              [CHWP_ORIGIN[0] + 0.07, 5.20, CHWP_ORIGIN[2] + 1.05],
+              /* Down to the motor terminal box */
+              [CHWP_ORIGIN[0] + 0.37, 1.13, CHWP_ORIGIN[2] + 1.05],
             ]}
           />
-        </>
-      )}
+      </>
     </>
   );
 }
