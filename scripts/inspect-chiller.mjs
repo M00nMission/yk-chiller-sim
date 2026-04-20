@@ -28,7 +28,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const GLB = path.resolve(__dirname, '..', 'public', 'models', 'Chiller_R2.glb');
+const GLB = path.resolve(__dirname, '..', 'public', 'models', 'chiller-r2', 'Chiller_R2.glb');
 const Y_OFFSET = 0.8;
 
 function pad(s, n) {

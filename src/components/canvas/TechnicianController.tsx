@@ -28,8 +28,10 @@ import {
   LADDER_ROOF_EXIT,
   inLadderVolume,
   canStandOnRoof,
-  isBlockedMain,
-  isBlockedRoof,
+  volumeBlockMain,
+  volumeBlockRoof,
+  PLAYER_COLLISION_HEIGHT,
+  PLAYER_AIR_COLLISION_HEIGHT,
 } from '../../world/walkModeWorld';
 
 /* ─── Minecraft-matched movement tunables ──────────────────────────────── */
@@ -38,7 +40,8 @@ const WALK_SPEED   = 4.317;
 const SPRINT_SPEED = 8.2;
 const SNEAK_SPEED  = 1.295;
 const AIR_CONTROL  = 0.85;
-const JUMP_VEL     = 5.4;
+/** ~1.83 m apex @ GRAVITY=20 — clears low insulated headers with margin. */
+const JUMP_VEL     = 8.55;
 const GRAVITY      = 20.0;
 const CLIMB_SPEED  = 3.15;  // m/s — fixed ladder climb
 
@@ -279,42 +282,24 @@ export function TechnicianController({
 
     const onRoof = onRoofRef.current;
     const xBound = onRoof ? ROOF_MOVEMENT_BOUND : ROOM_BOUND;
-    const blockFn = onRoof ? isBlockedRoof : isBlockedMain;
 
-    if (moving) {
-      const sx = (dirX / dirLen) * speed * delta;
-      const sz = (dirZ / dirLen) * speed * delta;
-
-      let nx = THREE.MathUtils.clamp(posRef.current.x + sx, -xBound, xBound);
-      let nz = THREE.MathUtils.clamp(posRef.current.z + sz, -xBound, xBound);
-
-      if (blockFn(nx, nz)) {
-        if (!blockFn(nx, posRef.current.z)) {
-          nz = posRef.current.z;
-        } else if (!blockFn(posRef.current.x, nz)) {
-          nx = posRef.current.x;
-        } else {
-          nx = posRef.current.x;
-          nz = posRef.current.z;
-        }
+    /* Jump before integration so lift-off velocity applies this same frame. */
+    const jumpHeld = !!(k[' '] || k['spacebar']);
+    if (jumpHeld && onGroundRef.current) {
+      const feetYJump = posRef.current.y;
+      const onMainSolid =
+        feetYJump <= MAIN_FLOOR_Y + 0.07 &&
+        feetYJump >= MAIN_FLOOR_Y - 0.02 &&
+        !onRoofRef.current;
+      const onRoofSolid =
+        onRoofRef.current &&
+        feetYJump >= ROOF_WALK_Y - 0.12 &&
+        feetYJump <= ROOF_WALK_Y + 0.14 &&
+        canStandOnRoof(posRef.current.x, posRef.current.z);
+      if (onMainSolid || onRoofSolid) {
+        yVelRef.current = JUMP_VEL;
+        onGroundRef.current = false;
       }
-      posRef.current.x = nx;
-      posRef.current.z = nz;
-    }
-
-    /* Walked or jumped past solid deck — no footing (fall to machine-room floor) */
-    if (
-      onRoofRef.current &&
-      y <= ROOF_WALK_Y + 0.08 &&
-      y >= ROOF_WALK_Y - 0.25 &&
-      !canStandOnRoof(posRef.current.x, posRef.current.z)
-    ) {
-      onGroundRef.current = false;
-      onRoofRef.current = false;
-    }
-
-    if (onRoofRef.current && y < ROOF_WALK_Y - 0.35) {
-      onRoofRef.current = false;
     }
 
     yVelRef.current -= GRAVITY * delta;
@@ -347,24 +332,49 @@ export function TechnicianController({
 
     posRef.current.y = y;
 
-    /* Hold Space: jump again whenever grounded (bunny-hop while held). */
-    const jumpHeld = !!(k[' '] || k['spacebar']);
-    if (jumpHeld && onGroundRef.current) {
-      const feetY = posRef.current.y;
-      const onMainSolid =
-        feetY <= MAIN_FLOOR_Y + 0.07 &&
-        feetY >= MAIN_FLOOR_Y - 0.02 &&
-        !onRoofRef.current;
-      const onRoofSolid =
-        onRoofRef.current &&
-        feetY >= ROOF_WALK_Y - 0.12 &&
-        feetY <= ROOF_WALK_Y + 0.14 &&
-        canStandOnRoof(posRef.current.x, posRef.current.z);
-      if (onMainSolid || onRoofSolid) {
-        yVelRef.current = JUMP_VEL;
-        onGroundRef.current = false;
-        posRef.current.y = feetY;
+    /* Physics first, then XZ: collision uses post-integration feet height.
+       Airborne uses a shorter capsule (realistic vault / legs trail). */
+    const collH = onGroundRef.current
+      ? PLAYER_COLLISION_HEIGHT
+      : PLAYER_AIR_COLLISION_HEIGHT;
+    const blockFn = onRoof
+      ? (px: number, pz: number) => volumeBlockRoof(px, pz, posRef.current.y, collH)
+      : (px: number, pz: number) => volumeBlockMain(px, pz, posRef.current.y, collH);
+
+    if (moving) {
+      const sx = (dirX / dirLen) * speed * delta;
+      const sz = (dirZ / dirLen) * speed * delta;
+
+      let nx = THREE.MathUtils.clamp(posRef.current.x + sx, -xBound, xBound);
+      let nz = THREE.MathUtils.clamp(posRef.current.z + sz, -xBound, xBound);
+
+      if (blockFn(nx, nz)) {
+        if (!blockFn(nx, posRef.current.z)) {
+          nz = posRef.current.z;
+        } else if (!blockFn(posRef.current.x, nz)) {
+          nx = posRef.current.x;
+        } else {
+          nx = posRef.current.x;
+          nz = posRef.current.z;
+        }
       }
+      posRef.current.x = nx;
+      posRef.current.z = nz;
+    }
+
+    /* Walked or jumped past solid deck — no footing (fall to machine-room floor) */
+    if (
+      onRoofRef.current &&
+      posRef.current.y <= ROOF_WALK_Y + 0.08 &&
+      posRef.current.y >= ROOF_WALK_Y - 0.25 &&
+      !canStandOnRoof(posRef.current.x, posRef.current.z)
+    ) {
+      onGroundRef.current = false;
+      onRoofRef.current = false;
+    }
+
+    if (onRoofRef.current && posRef.current.y < ROOF_WALK_Y - 0.35) {
+      onRoofRef.current = false;
     }
 
     let bob = 0;

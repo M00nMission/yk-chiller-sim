@@ -65,7 +65,7 @@ export interface ChillerConfig {
 
 export interface ValveState {
   id: string;
-  type: 'ball' | 'gate' | 'check' | 'butterfly';
+  type: 'ball' | 'gate' | 'check' | 'butterfly' | 'globe' | 'motorized' | 'drain';
   open: boolean;
   position: number; // 0 = closed, 1 = open
 }

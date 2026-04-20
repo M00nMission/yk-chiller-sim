@@ -77,6 +77,34 @@ const defaultValves: ValveState[] = [
   { id: 'purge', type: 'ball', open: false, position: 0 },
   { id: 'condenserWaterInlet', type: 'butterfly', open: true, position: 1 },
   { id: 'evaporatorWaterInlet', type: 'butterfly', open: true, position: 1 },
+  /* Field piping — CHW header OS&Y isolation */
+  { id: 'pipe_gate_chw_supply_chiller', type: 'gate', open: true, position: 1 },
+  { id: 'pipe_gate_chw_return_chiller', type: 'gate', open: true, position: 1 },
+  { id: 'pipe_gate_chw_supply_ahu', type: 'gate', open: true, position: 1 },
+  { id: 'pipe_gate_chw_return_ahu', type: 'gate', open: true, position: 1 },
+  /* CDW riser + roof isolation (per supply/return loop) */
+  { id: 'pipe_gate_cdw_riser_sup', type: 'gate', open: true, position: 1 },
+  { id: 'pipe_gate_cdw_roof_sup', type: 'gate', open: true, position: 1 },
+  { id: 'pipe_gate_cdw_riser_ret', type: 'gate', open: true, position: 1 },
+  { id: 'pipe_gate_cdw_roof_ret', type: 'gate', open: true, position: 1 },
+  /* Butterflies + actuated valves */
+  { id: 'pipe_bf_chws_secondary', type: 'butterfly', open: true, position: 1 },
+  { id: 'pipe_bf_chwr_secondary', type: 'butterfly', open: true, position: 1 },
+  { id: 'pipe_cv_chws_tcv1', type: 'motorized', open: true, position: 1 },
+  { id: 'pipe_bf_cdws_riser', type: 'butterfly', open: true, position: 1 },
+  { id: 'pipe_cv_cdws_tbv1', type: 'motorized', open: true, position: 1 },
+  { id: 'pipe_bf_cdws_tower', type: 'butterfly', open: true, position: 1 },
+  { id: 'pipe_bf_cdwr_strainer_out', type: 'butterfly', open: true, position: 1 },
+  { id: 'pipe_bf_cdwr_tower', type: 'butterfly', open: true, position: 1 },
+  /* Manual balancing globes */
+  { id: 'pipe_globe_chws_balance', type: 'globe', open: true, position: 1 },
+  { id: 'pipe_globe_chwr_balance', type: 'globe', open: true, position: 1 },
+  /* Low-point and header drains */
+  { id: 'pipe_drain_chws_header', type: 'drain', open: false, position: 0 },
+  { id: 'pipe_drain_chwr_header', type: 'drain', open: false, position: 0 },
+  { id: 'pipe_drain_cdws_riser_base', type: 'drain', open: false, position: 0 },
+  { id: 'pipe_drain_cdwr_riser_base', type: 'drain', open: false, position: 0 },
+  { id: 'pipe_drain_cdws_roof', type: 'drain', open: false, position: 0 },
 ];
 
 const defaultStartupSteps: StartupStep[] = [

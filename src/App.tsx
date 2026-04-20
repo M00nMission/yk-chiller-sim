@@ -1,5 +1,5 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Suspense, useState, useRef, useEffect, useLayoutEffect, type MutableRefObject, type CSSProperties } from 'react';
+import { Suspense, useState, useRef, useEffect, useLayoutEffect, type MutableRefObject } from 'react';
 import { useGLTF, Text, OrbitControls, PointerLockControls, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { Scene, CHILLER_ORBIT_TARGET, DEFAULT_SIM_CAMERA_POSITION } from './components/canvas/Scene';
@@ -14,6 +14,7 @@ import {
   PressureGauge,
   TemperatureGauge,
   GateValve,
+  GlobeValve,
   ButterflyValve,
   MotorizedValve,
   CheckValve,
@@ -2002,13 +2003,37 @@ function EngineRoom({
             ))}
 
             {/* Inline OS&Y gate valves at chiller side of each header (~3 m from tee) */}
-            <GateValve position={[CHW_X_SUPPLY - 3.0, HEADER_Y, CHW_Z_SUPPLY]} pipeRadius={MAIN_PIPE_RADIUS} bodyColor="#1c5aa8" />
-            <GateValve position={[CHW_X_RETURN - 3.0, HEADER_Y, CHW_Z_RETURN]} pipeRadius={MAIN_PIPE_RADIUS} bodyColor="#a89270" />
+            <GateValve
+              valveId="pipe_gate_chw_supply_chiller"
+              position={[CHW_X_SUPPLY - 3.0, HEADER_Y, CHW_Z_SUPPLY]}
+              pipeRadius={MAIN_PIPE_RADIUS}
+              outerRadius={MAIN_PIPE_INS_RADIUS}
+              bodyColor="#1c5aa8"
+            />
+            <GateValve
+              valveId="pipe_gate_chw_return_chiller"
+              position={[CHW_X_RETURN - 3.0, HEADER_Y, CHW_Z_RETURN]}
+              pipeRadius={MAIN_PIPE_RADIUS}
+              outerRadius={MAIN_PIPE_INS_RADIUS}
+              bodyColor="#a89270"
+            />
 
             {/* Inline OS&Y gate valves at AHU side of each header
                 (just chiller-side of the new AHU east-face tee at AHU_TEE_X) */}
-            <GateValve position={[AHU_TEE_X + 1.5, HEADER_Y, CHW_Z_SUPPLY]} pipeRadius={MAIN_PIPE_RADIUS} bodyColor="#1c5aa8" />
-            <GateValve position={[AHU_TEE_X + 1.5, HEADER_Y, CHW_Z_RETURN]} pipeRadius={MAIN_PIPE_RADIUS} bodyColor="#a89270" />
+            <GateValve
+              valveId="pipe_gate_chw_supply_ahu"
+              position={[AHU_TEE_X + 1.5, HEADER_Y, CHW_Z_SUPPLY]}
+              pipeRadius={MAIN_PIPE_RADIUS}
+              outerRadius={MAIN_PIPE_INS_RADIUS}
+              bodyColor="#1c5aa8"
+            />
+            <GateValve
+              valveId="pipe_gate_chw_return_ahu"
+              position={[AHU_TEE_X + 1.5, HEADER_Y, CHW_Z_RETURN]}
+              pipeRadius={MAIN_PIPE_RADIUS}
+              outerRadius={MAIN_PIPE_INS_RADIUS}
+              bodyColor="#a89270"
+            />
           </group>
         );
       })()}
@@ -2266,6 +2291,7 @@ function EngineRoom({
             </mesh>
             {/* OS&Y gate valve in engine-room riser at maintenance height */}
             <GateValve
+              valveId={key === 'sup' ? 'pipe_gate_cdw_riser_sup' : 'pipe_gate_cdw_riser_ret'}
               position={[xRiser, 4.50, z]}
               rotation={[0, 0, Math.PI / 2]}
               pipeRadius={MAIN_PIPE_RADIUS}
@@ -2273,6 +2299,7 @@ function EngineRoom({
             />
             {/* OS&Y gate valve on rooftop main near tower (service isolation) */}
             <GateValve
+              valveId={key === 'sup' ? 'pipe_gate_cdw_roof_sup' : 'pipe_gate_cdw_roof_ret'}
               position={[ROOF_X_END - 1.6, MAIN_Y, z]}
               pipeRadius={MAIN_PIPE_RADIUS}
               bodyColor={pipeC}
@@ -2858,14 +2885,23 @@ function EngineRoom({
         pipeRadius={MAIN_PIPE_RADIUS}
         label="TS"
       />
+      <GlobeValve
+        valveId="pipe_globe_chws_balance"
+        position={[-8.05, 1.10, CHW_Z_SUPPLY]}
+        pipeRadius={MAIN_PIPE_RADIUS}
+        bodyColor="#2c4a72"
+      />
       {/* secondary butterfly isolation just downstream of the gate valve */}
       <ButterflyValve
+        valveId="pipe_bf_chws_secondary"
         position={[-8.6, 1.10, CHW_Z_SUPPLY]}
         pipeRadius={MAIN_PIPE_RADIUS}
+        outerRadius={MAIN_PIPE_INS_RADIUS}
         bodyColor="#2c4a72"
       />
       {/* electric modulating control valve mid-run */}
       <MotorizedValve
+        valveId="pipe_cv_chws_tcv1"
         position={[-15.0, 1.10, CHW_Z_SUPPLY]}
         pipeRadius={MAIN_PIPE_RADIUS}
         bodyColor="#2c4a72"
@@ -2878,6 +2914,7 @@ function EngineRoom({
       />
       {/* drain valve at low point on the AHU-side leg of the header */}
       <DrainValve
+        valveId="pipe_drain_chws_header"
         position={[-19.5, 1.10, CHW_Z_SUPPLY]}
         pipeRadius={MAIN_PIPE_RADIUS}
       />
@@ -2903,10 +2940,19 @@ function EngineRoom({
         position={[-8.8, 1.10, CHW_Z_RETURN]}
         pipeRadius={MAIN_PIPE_RADIUS}
         bodyColor="#7a6e4e"
+        idBand={false}
+      />
+      <GlobeValve
+        valveId="pipe_globe_chwr_balance"
+        position={[-9.65, 1.10, CHW_Z_RETURN]}
+        pipeRadius={MAIN_PIPE_RADIUS}
+        bodyColor="#7a6e4e"
       />
       <ButterflyValve
+        valveId="pipe_bf_chwr_secondary"
         position={[-10.5, 1.10, CHW_Z_RETURN]}
         pipeRadius={MAIN_PIPE_RADIUS}
+        outerRadius={MAIN_PIPE_INS_RADIUS}
         bodyColor="#7a6e4e"
       />
       {/* swing check valve — stops reverse flow through evap when pump off */}
@@ -2920,6 +2966,7 @@ function EngineRoom({
         pipeRadius={MAIN_PIPE_RADIUS}
       />
       <DrainValve
+        valveId="pipe_drain_chwr_header"
         position={[-19.5, 1.10, CHW_Z_RETURN]}
         pipeRadius={MAIN_PIPE_RADIUS}
       />
@@ -2927,6 +2974,7 @@ function EngineRoom({
       {/* ─── CDWS riser accessories (vertical, x = CW_X_SUPPLY, z = CW_Z_SUPPLY) ─── */}
       {/* low-point drain at base of riser */}
       <DrainValve
+        valveId="pipe_drain_cdws_riser_base"
         position={[CW_X_SUPPLY, 2.3, CW_Z_SUPPLY]}
         rotation={[0, 0, Math.PI / 2]}
         pipeRadius={MAIN_PIPE_RADIUS}
@@ -2944,9 +2992,11 @@ function EngineRoom({
         label="TC-S"
       />
       <ButterflyValve
+        valveId="pipe_bf_cdws_riser"
         position={[CW_X_SUPPLY, 6.8, CW_Z_SUPPLY]}
         rotation={[0, 0, Math.PI / 2]}
         pipeRadius={MAIN_PIPE_RADIUS}
+        outerRadius={MAIN_PIPE_INS_RADIUS}
         bodyColor="#1f5a3a"
       />
       <TestPort
@@ -2960,7 +3010,13 @@ function EngineRoom({
         position={[4.0, 12.38, CW_Z_SUPPLY]}
         pipeRadius={MAIN_PIPE_RADIUS}
       />
+      <DrainValve
+        valveId="pipe_drain_cdws_roof"
+        position={[3.25, 12.38, CW_Z_SUPPLY]}
+        pipeRadius={MAIN_PIPE_RADIUS}
+      />
       <MotorizedValve
+        valveId="pipe_cv_cdws_tbv1"
         position={[14.0, 12.38, CW_Z_SUPPLY]}
         pipeRadius={MAIN_PIPE_RADIUS}
         bodyColor="#1f5a3a"
@@ -2970,9 +3026,11 @@ function EngineRoom({
 
       {/* ─── CDWS tower-side vertical riser accessories (x = 23.5, z = CW_Z_SUPPLY) ─── */}
       <ButterflyValve
+        valveId="pipe_bf_cdws_tower"
         position={[23.5, 13.9, CW_Z_SUPPLY]}
         rotation={[0, 0, Math.PI / 2]}
         pipeRadius={MAIN_PIPE_RADIUS}
+        outerRadius={MAIN_PIPE_INS_RADIUS}
         bodyColor="#1f5a3a"
       />
       <AirVent
@@ -2983,6 +3041,7 @@ function EngineRoom({
 
       {/* ─── CDWR riser accessories (vertical, x = CW_X_RETURN, z = CW_Z_RETURN) ─── */}
       <DrainValve
+        valveId="pipe_drain_cdwr_riser_base"
         position={[CW_X_RETURN, 2.3, CW_Z_RETURN]}
         rotation={[0, 0, Math.PI / 2]}
         pipeRadius={MAIN_PIPE_RADIUS}
@@ -3007,9 +3066,11 @@ function EngineRoom({
         bodyColor="#5a3a1f"
       />
       <ButterflyValve
+        valveId="pipe_bf_cdwr_strainer_out"
         position={[CW_X_RETURN, 8.4, CW_Z_RETURN]}
         rotation={[0, 0, Math.PI / 2]}
         pipeRadius={MAIN_PIPE_RADIUS}
+        outerRadius={MAIN_PIPE_INS_RADIUS}
         bodyColor="#5a3a1f"
       />
       <CheckValve
@@ -3027,9 +3088,11 @@ function EngineRoom({
 
       {/* ─── CDWR tower-side vertical riser accessories ─── */}
       <ButterflyValve
+        valveId="pipe_bf_cdwr_tower"
         position={[23.5, 13.9, CW_Z_RETURN]}
         rotation={[0, 0, Math.PI / 2]}
         pipeRadius={MAIN_PIPE_RADIUS}
+        outerRadius={MAIN_PIPE_INS_RADIUS}
         bodyColor="#5a3a1f"
       />
       <AirVent
@@ -3072,7 +3135,7 @@ function ChillerModel({
   hmiLookAtRef: MutableRefObject<THREE.Vector3>;
   hmiZoomed: boolean;
 }) {
-  const { scene } = useGLTF('/models/Chiller_R2.glb');
+  const { scene } = useGLTF('/models/chiller-r2/Chiller_R2.glb');
   const hmiMountRef = useRef<THREE.Group>(null);
 
   useLayoutEffect(() => {
@@ -3354,8 +3417,6 @@ export default function App() {
   const vfdLookAtRef = useRef(new THREE.Vector3(4.6, 2.2, -2.6));
   const panelZoom: HmiPanelZoomMode = zoomedVfd ? 'vfd' : zoomedHMI ? 'hmi' : 'none';
   const walkMode = useWalkModeStore((s) => s.walkMode);
-  const setWalkMode = useWalkModeStore((s) => s.setWalkMode);
-  const motionState = useWalkModeStore((s) => s.motionState);
 
   // Keep browser page-zoom (Ctrl/Cmd + wheel, trackpad pinch) from scaling the chrome
   // (top bar, iPad widget). OrbitControls still receives the wheel event for dolly.
@@ -3387,7 +3448,7 @@ export default function App() {
 
   // Note: in walk mode we deliberately let Esc fall through to the browser
   // so it just releases pointer-lock (Minecraft-style "open menu"). The user
-  // exits walk mode via the on-screen "Exit Walk" button.
+  // exits walk mode via the top bar "Walk Mode" toggle.
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#0a0a0a', position: 'relative', overflow: 'hidden' }}>
@@ -3503,102 +3564,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Walk-mode toggle button (bottom-right) */}
-      <button
-        type="button"
-        onClick={() => setWalkMode(!walkMode)}
-        style={{
-          position: 'absolute',
-          right: 16,
-          bottom: 16,
-          zIndex: 30,
-          padding: '10px 16px',
-          fontSize: 13,
-          fontWeight: 600,
-          fontFamily: 'system-ui, sans-serif',
-          color: walkMode ? '#0a1a14' : '#dde2e8',
-          background: walkMode ? '#3bff9f' : '#1d2128',
-          border: `1px solid ${walkMode ? '#2bd181' : '#3d4249'}`,
-          borderRadius: 8,
-          cursor: 'pointer',
-          letterSpacing: 0.4,
-          textTransform: 'uppercase',
-          boxShadow: walkMode
-            ? '0 0 0 2px rgba(59,255,159,0.18), 0 4px 14px rgba(0,0,0,0.45)'
-            : '0 4px 14px rgba(0,0,0,0.45)',
-        }}
-        title={walkMode ? 'Exit walk mode' : 'Walk through the engine room (Minecraft-style controls)'}
-      >
-        {walkMode ? '◼ Exit Walk' : '▶ Walk Mode'}
-      </button>
-
-      {/* Walk-mode HUD (bottom-left): controls + live status */}
-      {walkMode && (
-        <div
-          style={{
-            position: 'absolute',
-            left: 16,
-            bottom: 16,
-            zIndex: 30,
-            padding: '12px 16px',
-            background: 'rgba(18,21,24,0.92)',
-            border: '1px solid #2d3239',
-            borderRadius: 10,
-            color: '#dde2e8',
-            fontFamily: 'system-ui, sans-serif',
-            fontSize: 12,
-            backdropFilter: 'blur(6px)',
-            minWidth: 240,
-            pointerEvents: 'none',
-          }}
-        >
-          <div
-            style={{
-              fontSize: 10,
-              fontWeight: 700,
-              letterSpacing: 1.2,
-              color: '#5a6578',
-              marginBottom: 6,
-            }}
-          >
-            FIELD TECHNICIAN
-          </div>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 8 }}>
-            <span
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                background:
-                  motionState === 'run'  ? '#ff7b3b' :
-                  motionState === 'walk' ? '#3bff9f' :
-                                           '#5a6578',
-                boxShadow:
-                  motionState === 'idle'
-                    ? 'none'
-                    : `0 0 8px ${motionState === 'run' ? '#ff7b3b' : '#3bff9f'}`,
-              }}
-            />
-            <span style={{ textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 600 }}>
-              {motionState}
-            </span>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: 10, rowGap: 4, color: '#a8b1bd' }}>
-            <kbd style={kbdStyle}>W A S D</kbd>     <span>move</span>
-            <kbd style={kbdStyle}>Mouse</kbd>       <span>look around</span>
-            <kbd style={kbdStyle}>Space</kbd>       <span>jump</span>
-            <kbd style={kbdStyle}>⇧ Shift</kbd>     <span>sneak</span>
-            <kbd style={kbdStyle}>Ctrl / W,W</kbd>  <span>sprint</span>
-            <kbd style={kbdStyle}>Click</kbd>       <span>capture mouse</span>
-            <kbd style={kbdStyle}>Esc</kbd>         <span>release mouse</span>
-            <kbd style={kbdStyle}>W / S</kbd>       <span>climb roof ladder (in shaft)</span>
-          </div>
-          <div style={{ marginTop: 8, fontSize: 11, color: '#7a8594', lineHeight: 1.45 }}>
-            Rooftop: open hatch over the ladder in the back-right corner — walk onto the opening to descend (yellow “ROOF ACCESS” sign).
-          </div>
-        </div>
-      )}
-
       {/* Exit-zoom button — appears top-left when HMI is zoomed in.
           We deliberately DO NOT cover the screen with a click-shield, so
           the HMI itself remains fully interactive (the user can read and
@@ -3633,15 +3598,3 @@ export default function App() {
     </div>
   );
 }
-
-const kbdStyle: CSSProperties = {
-  display: 'inline-block',
-  padding: '1px 6px',
-  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-  fontSize: 10,
-  color: '#dde2e8',
-  background: '#23272c',
-  border: '1px solid #3d4249',
-  borderRadius: 4,
-  whiteSpace: 'nowrap',
-};
