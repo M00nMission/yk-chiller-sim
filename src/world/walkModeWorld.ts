@@ -32,11 +32,12 @@ export const BUILDING_Z_MIN = -35;
 /** South face is open (no wall). Anything past here is "outside / yard". */
 export const BUILDING_Z_MAX = 35;
 
-/** Inner deck where footing is solid (landing / stand checks) */
-export const ROOF_SOLID_BOUND = 33;
+/** Inner deck where footing is solid (landing / stand checks).
+    Slab spans ±36 in both axes; parapet inner face is at ±35.85.
+    35.5 keeps the player well inside the concrete and away from the parapet lip. */
+export const ROOF_SOLID_BOUND = 35.5;
 
-/** Outer limit for walking on the roof — beyond ROOF_SOLID_BOUND there is no slab
-    (step off or jump to fall to the machine-room floor). ~matches 72×72 deck vs parapet */
+/** Outer limit for walking on the roof — parapet blocks further movement. */
 export const ROOF_MOVEMENT_BOUND = 35.75;
 
 /**
@@ -283,6 +284,66 @@ const ROOF_LOW_AABBS: Aabb[] = [
   { x0: AHU_X - 7.35, x1: AHU_X + 7.35, z0: AHU_Z - 2.95, z1: AHU_Z + 2.95, y0: 12.28, y1: 12.78 },
 ];
 
+/* ─── Ladder collision geometry ───────────────────────────────────────────
+   All four sides of the shaft are blocked so the player cannot walk through
+   the rail structure from any direction.  Climbing is initiated explicitly
+   in TechnicianController when the player presses W near the south face,
+   which snaps them into the shaft and lifts y above the floor endpoint
+   threshold so inShaft activates.
+
+   World-space ladder centre: x=28, z=-31.1  (LADDER.xMin/Max, zMin/Max)
+   Rail positions (from App.tsx local offsets ±0.52):  x≈27.48 and 28.52
+*/
+const LADDER_X_MIN = 27.35;
+const LADDER_X_MAX = 28.65;
+const LADDER_Z_MIN = -32.15;
+const LADDER_Z_MAX = -30.05;
+const LADDER_SLAB_H = 12.2; /* full height — rails run floor to roof */
+const LADDER_SLAB_T = 0.28; /* slab thickness — wide enough to be reliable */
+
+/** How close to the south face the player must be to trigger a floor-entry climb. */
+export const LADDER_ENTRY_DIST = 1.2;
+
+const LADDER_AABBS: Aabb[] = [
+  /* Left rail slab */
+  {
+    x0: LADDER_X_MIN - LADDER_SLAB_T,
+    x1: LADDER_X_MIN + LADDER_SLAB_T,
+    z0: LADDER_Z_MIN - LADDER_SLAB_T,
+    z1: LADDER_Z_MAX + LADDER_SLAB_T,
+    y0: 0,
+    y1: LADDER_SLAB_H,
+  },
+  /* Right rail slab */
+  {
+    x0: LADDER_X_MAX - LADDER_SLAB_T,
+    x1: LADDER_X_MAX + LADDER_SLAB_T,
+    z0: LADDER_Z_MIN - LADDER_SLAB_T,
+    z1: LADDER_Z_MAX + LADDER_SLAB_T,
+    y0: 0,
+    y1: LADDER_SLAB_H,
+  },
+  /* Back plate — ladder meets the building's back wall */
+  {
+    x0: LADDER_X_MIN - LADDER_SLAB_T,
+    x1: LADDER_X_MAX + LADDER_SLAB_T,
+    z0: LADDER_Z_MIN - LADDER_SLAB_T,
+    z1: LADDER_Z_MIN + LADDER_SLAB_T,
+    y0: 0,
+    y1: LADDER_SLAB_H,
+  },
+  /* South face — blocks the player from walking through the open front;
+     climbing is handled explicitly by the controller's floor-entry logic. */
+  {
+    x0: LADDER_X_MIN - LADDER_SLAB_T,
+    x1: LADDER_X_MAX + LADDER_SLAB_T,
+    z0: LADDER_Z_MAX - LADDER_SLAB_T,
+    z1: LADDER_Z_MAX + LADDER_SLAB_T,
+    y0: 0,
+    y1: LADDER_SLAB_H,
+  },
+];
+
 export function volumeBlockMain(
   x: number,
   z: number,
@@ -297,6 +358,9 @@ export function volumeBlockMain(
   for (const b of MAIN_AABBS) {
     if (aabbBlocks(x, z, feetY, topY, b)) return true;
   }
+  for (const b of LADDER_AABBS) {
+    if (aabbBlocks(x, z, feetY, topY, b)) return true;
+  }
   return false;
 }
 
@@ -309,6 +373,16 @@ export function volumeBlockRoof(
   const topY = feetY + bodyHeight;
   if (Math.hypot(x - CW_TOWER_X, z - CW_TOWER_Z) < TOWER_BLOCK_R) return true;
   if (Math.abs(x - AHU_X) < AHU_HALF_W && Math.abs(z - AHU_Z) < AHU_HALF_D) return true;
+  /* Hatch shaft opening — treat as a solid wall on the roof so the player
+     bumps into it laterally rather than accidentally stepping into the void
+     and falling. The shaft has no concrete over it so inLadderVolume cannot
+     provide footing; blocking XZ movement is the only safe option. */
+  if (
+    x >= LADDER.xMin - 0.05 &&
+    x <= LADDER.xMax + 0.05 &&
+    z >= LADDER.zMin - 0.05 &&
+    z <= LADDER.zMax + 0.05
+  ) return true;
   for (const b of ROOF_CDW_AABBS) {
     if (aabbBlocks(x, z, feetY, topY, b)) return true;
   }
@@ -348,6 +422,53 @@ export const LADDER = {
 
 /** After climbing up, spawn feet here (solid deck, just inside the room) */
 export const LADDER_ROOF_EXIT: [number, number, number] = [28, ROOF_WALK_Y, -28.4];
+
+/** After climbing down, land here — XZ clear of the shaft so the player
+    can walk freely in any direction without re-entering the ladder volume. */
+export const LADDER_FLOOR_EXIT: [number, number, number] = [
+  (LADDER.xMin + LADDER.xMax) / 2,
+  MAIN_FLOOR_Y,
+  LADDER.zMax + 0.8,
+];
+
+/** Center of shaft at hatch lip — placed here when initiating a roof-down descent */
+export const LADDER_ROOF_ENTRY: [number, number, number] = [
+  (LADDER.xMin + LADDER.xMax) / 2,
+  ROOF_WALK_Y - 0.14,
+  (LADDER.zMin + LADDER.zMax) / 2,
+];
+
+/** Snap-in point when the player grabs the ladder from the ground floor.
+ *  XZ is shaft centre; y is just above the floor endpoint threshold so
+ *  inShaft activates on the very next frame. */
+export const LADDER_FLOOR_ENTRY: [number, number, number] = [
+  (LADDER.xMin + LADDER.xMax) / 2,
+  MAIN_FLOOR_Y + 0.12,
+  (LADDER.zMin + LADDER.zMax) / 2,
+];
+
+/** True when the player is on the ground floor, approaching the ladder from
+ *  the south (positive-Z side) and horizontally aligned with the shaft opening.
+ *  The trigger window sits just outside the south-face slab so pressing W
+ *  while bumped against it snaps the player into climb mode. */
+export function nearLadderBase(x: number, z: number): boolean {
+  const cx = (LADDER.xMin + LADDER.xMax) / 2;
+  const southFace = LADDER.zMax; // = -30.05
+  return (
+    Math.abs(x - cx) <= (LADDER.xMax - LADDER.xMin) / 2 + 0.3 &&
+    z >= southFace - 0.1 &&              // just inside or at the slab face
+    z <= southFace + LADDER_ENTRY_DIST   // up to 1.2 m away on approach side
+  );
+}
+
+/** True when the player is on the roof within reach of the hatch opening. */
+export function nearLadderHatch(x: number, z: number): boolean {
+  const cx = (LADDER.xMin + LADDER.xMax) / 2;
+  const cz = (LADDER.zMin + LADDER.zMax) / 2;
+  const dx = x - cx;
+  const dz = z - cz;
+  return dx * dx + dz * dz <= 4.5 * 4.5; // 4.5 m radius around hatch centre
+}
 
 export function inLadderVolume(x: number, z: number): boolean {
   return (

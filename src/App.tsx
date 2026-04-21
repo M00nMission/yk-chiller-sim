@@ -26,9 +26,23 @@ import {
   FLANGE_OUTSET,
 } from './components/canvas/PipingAccessories';
 import { Vfd, VfdWiring } from './components/canvas/Vfd';
-import { PidPlantSystems } from './components/canvas/PidPlantSystems';
+import { PidPlantSystems, type PidPlantSystemsProps } from './components/canvas/PidPlantSystems';
 import { PipeFlowMarkers } from './components/canvas/PipeFlowMarkers';
+import { useCdwLoopFlowing, useChwLoopFlowing } from './hooks/useLoopFlow';
 import { EndSuctionHvacPump } from './components/canvas/IndustrialCentrifugalPump';
+import {
+  MervFilterBank,
+  ChwCopperCoil,
+  HousedCentrifugalBlower,
+  ServiceDisconnect,
+  OutsideAirDamper,
+  AhuGlbPreview,
+  HotWaterHeatingCoil,
+  ReturnAirDamper,
+  SteamHumidifier,
+  RotaryEnergyWheel,
+  PreFilterBank,
+} from './components/canvas/AhuComponents';
 import { useSimulationStore } from './store/useSimulationStore';
 import { useGarageDoorStore } from './store/useGarageDoorStore';
 import { useChillerColorStore } from './store/useChillerColorStore';
@@ -188,6 +202,106 @@ function PipeLabel({
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
+   COOLING TOWER SPRAY ANIMATION
+   Simulates water nozzles misting downward through the fill pack while the
+   induced-draft fan draws air upward from the louver inlets to the stack.
+   Each droplet starts at a random nozzle position near the distribution
+   header (y ≈ CASING_TOP + 0.15) and falls through the fill zone, resetting
+   to the top when it reaches the basin surface. Only visible when flowing.
+   ───────────────────────────────────────────────────────────────────────── */
+function CoolingTowerSpray({
+  flowing,
+  W,
+  D,
+  casingTop,
+  basinTop,
+}: {
+  flowing: boolean;
+  W: number;
+  D: number;
+  casingTop: number;
+  basinTop: number;
+}) {
+  const COUNT = 80;
+  const FALL_SPEED = 0.9; // m/s fall rate (slowed to show misting)
+  const SPRAY_Y_START = casingTop + 0.12;
+  const SPRAY_Y_END   = basinTop  - 0.05;
+  const FALL_RANGE    = SPRAY_Y_START - SPRAY_Y_END;
+
+  // Phase offsets — random per-drop start position in the fall cycle.
+  // useMemo with [] gives a stable array that is only computed once.
+  const phaseRef  = useRef(
+    (() => { const a = new Float32Array(COUNT); for (let i = 0; i < COUNT; i++) a[i] = Math.random(); return a; })()
+  );
+  const positionsRef = useRef(new Float32Array(COUNT * 3));
+  const sizesRef     = useRef(new Float32Array(COUNT));
+
+  // Pre-generate random X/Z scatter positions within the fill footprint
+  const xzRef = useRef(
+    (() => {
+      const a = new Float32Array(COUNT * 2);
+      for (let i = 0; i < COUNT; i++) {
+        a[i * 2    ] = (Math.random() - 0.5) * (W - 0.50);
+        a[i * 2 + 1] = (Math.random() - 0.5) * (D - 0.50);
+      }
+      return a;
+    })()
+  );
+
+  const pointsRef = useRef<THREE.Points>(null);
+
+  useFrame((_, dt) => {
+    if (!flowing) return;
+    const ph  = phaseRef.current;
+    const xz  = xzRef.current;
+    const pos = positionsRef.current;
+    const siz = sizesRef.current;
+    for (let i = 0; i < COUNT; i++) {
+      ph[i] = (ph[i] + (dt * FALL_SPEED) / FALL_RANGE) % 1.0;
+      pos[i * 3    ] = xz[i * 2    ];
+      pos[i * 3 + 1] = SPRAY_Y_START - ph[i] * FALL_RANGE;
+      pos[i * 3 + 2] = xz[i * 2 + 1];
+      // Drops grow slightly as they fall and break up
+      siz[i] = 0.04 + ph[i] * 0.06;
+    }
+    if (pointsRef.current) {
+      const geom = pointsRef.current.geometry;
+      const posAttr = geom.getAttribute('position') as THREE.BufferAttribute;
+      const sizeAttr = geom.getAttribute('size') as THREE.BufferAttribute;
+      posAttr.array.set(pos);
+      sizeAttr.array.set(siz);
+      posAttr.needsUpdate = true;
+      sizeAttr.needsUpdate = true;
+    }
+  });
+
+  if (!flowing) return null;
+
+  return (
+    <points ref={pointsRef}>
+      <bufferGeometry>
+        <bufferAttribute
+          attach="attributes-position"
+          args={[positionsRef.current, 3]}
+        />
+        <bufferAttribute
+          attach="attributes-size"
+          args={[sizesRef.current, 1]}
+        />
+      </bufferGeometry>
+      <pointsMaterial
+        color="#7ec8e8"
+        size={0.12}
+        sizeAttenuation
+        transparent
+        opacity={0.72}
+        depthWrite={false}
+      />
+    </points>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
    ROOFTOP COOLING TOWER
    Rectangular packaged induced-draft counterflow cooling tower
    (BAC / Marley / Evapco style). Local +Y is up; origin sits at the
@@ -202,9 +316,10 @@ function PipeLabel({
      +2.30 .. +2.42  fan deck
      +2.42 .. +3.45  fan stack (venturi inlet + cylinder)
    Footprint: 4.0 (X) × 3.6 (Z).
-   Side condenser-water flanges on −X face at y≈+2.04 / +2.20.
+   Supply (hot CWS) enters from TOP through fan deck into distribution header.
+   Return (cold CWR) exits from BASIN BOTTOM on −X face.
    ───────────────────────────────────────────────────────────────────────── */
-function RooftopCoolingTower({ position }: { position: [number, number, number] }) {
+function RooftopCoolingTower({ position, flowing }: { position: [number, number, number]; flowing?: boolean }) {
   const fanRef = useRef<THREE.Group>(null);
   useFrame((_, dt) => {
     if (fanRef.current) fanRef.current.rotation.y += dt * 4.2;
@@ -534,40 +649,88 @@ function RooftopCoolingTower({ position }: { position: [number, number, number] 
         ))}
       </group>
 
-      {/* ─── SIDE PIPING CONNECTION FLANGES (-X face) ───────────────────
-         Two stub-out connections on the −X end-wall of the tower casing,
-         spread in Z to align with the engine-room CDW pipe pair (1.15 m
-         centerline spacing, matching the chiller's CW_Z_SUPPLY / RETURN
-         constants in EngineRoom). Supply flange is the upper / north
-         connection (green); return is lower / south (light green). */}
-      {[
-        { y: +2.20, z: -0.575, body: '#1d7a3a' as const, key: 'sup' }, // supply (green)
-        { y: +2.04, z: +0.575, body: '#7ec07a' as const, key: 'ret' }, // return (light green)
-      ].map(({ y, z, body, key }) => (
-        <group key={`twr-flg-${key}`} position={[-(W / 2), y, z]}>
-          <mesh rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.30, 0.30, 0.45, 16]} />
-            <meshStandardMaterial color={body} roughness={0.7} metalness={0.3} />
+      {/* ─── SUPPLY INLET FLANGE (TOP) ──────────────────────────────────
+         Hot condenser water enters the tower from the TOP through the
+         fan deck into the hot-water distribution header. The supply
+         pipe comes vertically down through the fan deck, centred in Z
+         but offset in X so it clears the fan shaft. This is the correct
+         counterflow path: hot water distributes across the top and falls
+         down through fill as air is drawn upward by the fan. */}
+      {/* Vertical inlet pipe stub through fan deck — supply (green) */}
+      <mesh position={[-(W / 4), FAN_DECK_TOP + 0.30, -0.575]}>
+        <cylinderGeometry args={[0.30, 0.30, 0.65, 16]} />
+        <meshStandardMaterial color={'#1d7a3a'} roughness={0.55} metalness={0.45} />
+      </mesh>
+      {/* Companion flange at deck penetration */}
+      <mesh position={[-(W / 4), FAN_DECK_TOP + 0.06, -0.575]}>
+        <cylinderGeometry args={[0.42, 0.42, 0.06, 16]} />
+        <meshStandardMaterial color={'#b07030'} roughness={0.25} metalness={0.95} />
+      </mesh>
+      {Array.from({ length: 8 }).map((_, fi) => {
+        const a = (fi / 8) * Math.PI * 2;
+        return (
+          <mesh
+            key={`bolt-sup-${fi}`}
+            position={[-(W / 4) + Math.cos(a) * 0.36, FAN_DECK_TOP + 0.055, -0.575 + Math.sin(a) * 0.36]}
+          >
+            <cylinderGeometry args={[0.025, 0.025, 0.05, 6]} />
+            <meshStandardMaterial color={'#222'} roughness={0.5} metalness={0.8} />
           </mesh>
-          <mesh position={[-0.22, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.42, 0.42, 0.06, 16]} />
-            <meshStandardMaterial color={'#b07030'} roughness={0.25} metalness={0.95} />
-          </mesh>
-          {Array.from({ length: 8 }).map((_, fi) => {
-            const a = (fi / 8) * Math.PI * 2;
-            return (
-              <mesh
-                key={`bolt-${key}-${fi}`}
-                position={[-0.225, Math.cos(a) * 0.36, Math.sin(a) * 0.36]}
-                rotation={[0, 0, Math.PI / 2]}
-              >
-                <cylinderGeometry args={[0.025, 0.025, 0.05, 6]} />
-                <meshStandardMaterial color={'#222'} roughness={0.5} metalness={0.8} />
-              </mesh>
-            );
-          })}
-        </group>
+        );
+      })}
+
+      {/* ─── HOT-WATER DISTRIBUTION HEADER (inside casing, below fan deck) ─── */}
+      {/* Lateral distribution header spanning the full Z width */}
+      <mesh position={[0, CASING_TOP + 0.35, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.18, 0.18, D - 0.30, 16]} />
+        <meshStandardMaterial color={'#1d7a3a'} roughness={0.55} metalness={0.45} />
+      </mesh>
+      {/* Distribution laterals — two parallel runs along X */}
+      {([-0.70, 0.70] as const).map((zOff, li) => (
+        <mesh key={`dist-lat-${li}`} position={[0, CASING_TOP + 0.35, zOff]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.12, 0.12, W - 0.50, 16]} />
+          <meshStandardMaterial color={'#1d7a3a'} roughness={0.55} metalness={0.45} />
+        </mesh>
       ))}
+      {/* Drop nozzle stubs — spray heads pointing down through fill */}
+      {Array.from({ length: 12 }).map((_, ni) => {
+        const nx = -(W / 2 - 0.40) + (ni % 4) * ((W - 0.80) / 3);
+        const nz = ni < 4 ? -0.70 : ni < 8 ? 0 : 0.70;
+        return (
+          <mesh key={`nozzle-stub-${ni}`} position={[nx, CASING_TOP + 0.20, nz]}>
+            <cylinderGeometry args={[0.055, 0.07, 0.30, 8]} />
+            <meshStandardMaterial color={'#aab8c0'} roughness={0.45} metalness={0.75} />
+          </mesh>
+        );
+      })}
+
+      {/* ─── RETURN OUTLET FLANGE (BASIN BOTTOM, -X face) ───────────────
+         Cold water collects in the bottom basin and exits through a
+         flanged stub on the −X face near the bottom of the basin.
+         The pump suction draws cooled water back to the chiller condenser. */}
+      <group position={[-(W / 2), BASIN_BOT + 0.45, +0.575]}>
+        <mesh rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.30, 0.30, 0.45, 16]} />
+          <meshStandardMaterial color={'#7ec07a'} roughness={0.7} metalness={0.3} />
+        </mesh>
+        <mesh position={[-0.22, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.42, 0.42, 0.06, 16]} />
+          <meshStandardMaterial color={'#b07030'} roughness={0.25} metalness={0.95} />
+        </mesh>
+        {Array.from({ length: 8 }).map((_, fi) => {
+          const a = (fi / 8) * Math.PI * 2;
+          return (
+            <mesh
+              key={`bolt-ret-${fi}`}
+              position={[-0.225, Math.cos(a) * 0.36, Math.sin(a) * 0.36]}
+              rotation={[0, 0, Math.PI / 2]}
+            >
+              <cylinderGeometry args={[0.025, 0.025, 0.05, 6]} />
+              <meshStandardMaterial color={'#222'} roughness={0.5} metalness={0.8} />
+            </mesh>
+          );
+        })}
+      </group>
 
       {/* ─── NAMEPLATE (small stainless tag on -Z face) ─── */}
       <mesh position={[-(W / 2) + 0.7, 0.1, -(D / 2) - 0.03]}>
@@ -627,6 +790,18 @@ function RooftopCoolingTower({ position }: { position: [number, number, number] 
       <Text position={[0, STACK_TOP + 0.45, 0]} fontSize={0.32} color="#ffffff" anchorX="center" anchorY="middle">
         CT-1
       </Text>
+
+      {/* ─── NOZZLE SPRAY ANIMATION ───────────────────────────────────────
+         Water droplets fall from the distribution header down through the
+         fill pack as the fan draws air upward. Only rendered when the CDW
+         loop is flowing. */}
+      <CoolingTowerSpray
+        flowing={!!flowing}
+        W={W}
+        D={D}
+        casingTop={CASING_TOP}
+        basinTop={BASIN_TOP}
+      />
     </group>
   );
 }
@@ -654,46 +829,74 @@ function RooftopCoolingTower({ position }: { position: [number, number, number] 
    atop the mixing box — both spin to make the unit clearly read as
    "operating" at a distance, matching the cooling-tower visual language.
    ───────────────────────────────────────────────────────────────────────── */
-function RooftopAHU({ position }: { position: [number, number, number] }) {
+function RooftopAHU({
+  position,
+  cutaway = false,
+}: {
+  position: [number, number, number];
+  /** When true, hides the exterior shell — main casing, panel seams,
+   *  access doors, door frames, fan grilles, end caps, OA hood, equipment
+   *  labels — so the internal MERV filter bank, CHW coil, housed centrifugal
+   *  blowers, OA damper, and service disconnect are fully visible. The
+   *  rooftop curb, walkway, top-mounted relief / exhaust fans, and the
+   *  floating overhead AHU-1 label are kept so the unit still reads as an
+   *  AHU at a distance. */
+  cutaway?: boolean;
+}) {
   const reliefFanRef = useRef<THREE.Group>(null);
   const exhaustFanRef = useRef<THREE.Group>(null);
-  const blowerARef = useRef<THREE.Group>(null);
-  const blowerBRef = useRef<THREE.Group>(null);
   const runLedRef = useRef<THREE.MeshStandardMaterial>(null);
   const alarmLedRef = useRef<THREE.MeshStandardMaterial>(null);
 
+  /* Constant-speed supply fan rotation at 760 RPM.
+     Centrifugal blowers: airflow is draw-through (+X direction).
+     Viewed from the −Z inlet side, the DWDI wheel rotates counter-clockwise
+     (standard forward-curved centrifugal = rotation.z negative in local frame).
+     rad/s = (760/60)*2π ≈ 79.6 rad/s → cap visual to 22 rad/s so it reads
+     clearly without motion-blur smear at 60 fps. */
+  const BLOWER_RAD_S = 22.0;
+  /* Rooftop axial fans: slower, 4.6 rad/s relief fan, 5.8 rad/s exhaust */
   useFrame((state, dt) => {
     if (reliefFanRef.current) reliefFanRef.current.rotation.y += dt * 4.6;
     if (exhaustFanRef.current) exhaustFanRef.current.rotation.y -= dt * 5.8;
-    /* Centrifugal blowers spin much faster than the axial roof fans */
-    if (blowerARef.current) blowerARef.current.rotation.x += dt * 14.0;
-    if (blowerBRef.current) blowerBRef.current.rotation.x += dt * 14.0;
     const t = state.clock.elapsedTime;
     if (runLedRef.current) {
       runLedRef.current.emissiveIntensity = 1.4 + Math.sin(t * 3.0) * 0.45;
     }
     if (alarmLedRef.current) {
-      /* Slow steady amber "communicating" pulse */
       alarmLedRef.current.emissiveIntensity = 0.6 + (Math.sin(t * 1.2) + 1) * 0.4;
     }
   });
+  void BLOWER_RAD_S; // used inside HousedCentrifugalBlower rpm prop below
 
-  /* ── Casing dimensions ── */
-  const W = 14.5;           // length (airflow axis)
-  const D = 5.6;            // depth
-  const H = 4.0;            // height
+  /* ── Casing dimensions ── (upsized for 500-ton / 200,000 CFM service)
+     W=18 m  — long axis along X (airflow direction, OA→supply discharge)
+     D=6.4 m — depth (cabinet width along Z)
+     H=5.0 m — height
+     These match ASHRAE Handbook proportions for a 500-ton draw-through
+     built-up AHU: 12–14 ft tall casing, 18–21 ft wide, 55–65 ft long. */
+  const W = 18.0;
+  const D = 6.4;
+  const H = 5.0;
 
-  /* Section X-positions (local) */
-  const OA_X_MIN   = -W / 2;            // -7.25
-  const OA_X_MAX   = -W / 2 + 2.85;     // -4.40
-  const FILT_X_MIN = OA_X_MAX;          // -4.40
-  const FILT_X_MAX = OA_X_MAX + 2.60;   // -1.80
-  const COIL_X_MIN = FILT_X_MAX;        // -1.80
-  const COIL_X_MAX = FILT_X_MAX + 5.00; // +3.20
-  const FAN_X_MIN  = COIL_X_MAX;        // +3.20
-  const FAN_X_MAX  = COIL_X_MAX + 3.00; // +6.20
-  const DISC_X_MIN = FAN_X_MAX;         // +6.20
-  const DISC_X_MAX = +W / 2;            // +7.25
+  /* Section X-positions (local, origin at casing center)
+     OA / Mixing : 3.5 m  — OA hood + RA mixing box + ERW
+     Pre-Filter  : 1.8 m  — MERV-8 + preheat coil
+     Final Filter: 1.8 m  — MERV-13
+     Coil        : 5.8 m  — CHW cooling coil (8-row deep, full span)
+     Humidifier  : 0.8 m  — steam grid
+     Fan         : 3.5 m  — twin DWDI blowers side by side
+     Discharge   : 0.8 m  — discharge plenum + curb opening */
+  const OA_X_MIN   = -W / 2;              // -9.0
+  const OA_X_MAX   = -W / 2 + 3.50;      // -5.5
+  const FILT_X_MIN = OA_X_MAX;            // -5.5
+  const FILT_X_MAX = OA_X_MAX + 3.60;    // -1.9
+  const COIL_X_MIN = FILT_X_MAX;          // -1.9
+  const COIL_X_MAX = FILT_X_MAX + 5.80;  // +3.9
+  const FAN_X_MIN  = COIL_X_MAX;          // +3.9
+  const FAN_X_MAX  = COIL_X_MAX + 3.50;  // +7.4
+  const DISC_X_MIN = FAN_X_MAX;           // +7.4
+  const DISC_X_MAX = +W / 2;              // +9.0
 
   /* Section centers (handy for placing access doors / labels) */
   const FILT_X = (FILT_X_MIN + FILT_X_MAX) / 2;
@@ -722,161 +925,345 @@ function RooftopAHU({ position }: { position: [number, number, number] }) {
         <meshStandardMaterial color={concrete} roughness={0.95} metalness={0.02} />
       </mesh>
 
-      {/* ─── MAIN CASING ─── */}
-      <mesh castShadow receiveShadow>
-        <boxGeometry args={[W, H, D]} />
-        <meshStandardMaterial color={casing} roughness={0.55} metalness={0.45} />
-      </mesh>
-
-      {/* Top deck slightly inset (gives a flanged-roof look) */}
-      <mesh position={[0, H / 2 + 0.04, 0]}>
-        <boxGeometry args={[W + 0.06, 0.08, D + 0.06]} />
-        <meshStandardMaterial color={casingDark} roughness={0.6} metalness={0.5} />
-      </mesh>
-
-      {/* Vertical panel seams along +Z and -Z faces (every section boundary
-          plus mid-bay seams, since each section is too wide for one panel) */}
-      {[
-        OA_X_MAX, FILT_X_MIN + 1.30, FILT_X_MAX,
-        COIL_X_MIN + 1.25, COIL_X_MIN + 2.50, COIL_X_MIN + 3.75, COIL_X_MAX,
-        FAN_X_MIN + 1.50, FAN_X_MAX,
-      ].map((sx, si) => (
-        <group key={`seam-${si}`}>
-          <mesh position={[sx, 0, D / 2 + 0.012]}>
-            <boxGeometry args={[0.05, H - 0.10, 0.030]} />
-            <meshStandardMaterial color={seam} roughness={0.6} metalness={0.55} />
+      {/* ─── EXTERIOR SHELL ─── (hidden when `cutaway` so the trainee can see
+          straight into the cabinet at the filter bank, coil, blowers, OA
+          damper, and service disconnect) */}
+      {!cutaway && (
+        <group name="ahu:shell">
+          {/* MAIN CASING */}
+          <mesh castShadow receiveShadow>
+            <boxGeometry args={[W, H, D]} />
+            <meshStandardMaterial color={casing} roughness={0.55} metalness={0.45} />
           </mesh>
-          <mesh position={[sx, 0, -D / 2 - 0.012]}>
-            <boxGeometry args={[0.05, H - 0.10, 0.030]} />
-            <meshStandardMaterial color={seam} roughness={0.6} metalness={0.55} />
+
+          {/* Top deck slightly inset (gives a flanged-roof look) */}
+          <mesh position={[0, H / 2 + 0.04, 0]}>
+            <boxGeometry args={[W + 0.06, 0.08, D + 0.06]} />
+            <meshStandardMaterial color={casingDark} roughness={0.6} metalness={0.5} />
           </mesh>
+
+          {/* Vertical panel seams along +Z and -Z faces (every section
+              boundary plus mid-bay seams, since each section is too wide
+              for one panel) */}
+          {[
+            OA_X_MAX, FILT_X_MIN + 1.30, FILT_X_MAX,
+            COIL_X_MIN + 1.25, COIL_X_MIN + 2.50, COIL_X_MIN + 3.75, COIL_X_MAX,
+            FAN_X_MIN + 1.50, FAN_X_MAX,
+          ].map((sx, si) => (
+            <group key={`seam-${si}`}>
+              <mesh position={[sx, 0, D / 2 + 0.012]}>
+                <boxGeometry args={[0.05, H - 0.10, 0.030]} />
+                <meshStandardMaterial color={seam} roughness={0.6} metalness={0.55} />
+              </mesh>
+              <mesh position={[sx, 0, -D / 2 - 0.012]}>
+                <boxGeometry args={[0.05, H - 0.10, 0.030]} />
+                <meshStandardMaterial color={seam} roughness={0.6} metalness={0.55} />
+              </mesh>
+            </group>
+          ))}
+
+          {/* Horizontal mid-band (visual panel reinforcement) */}
+          {[H * 0.20, -H * 0.20].map((by, bi) => (
+            <group key={`hband-${bi}`}>
+              <mesh position={[0, by, D / 2 + 0.012]}>
+                <boxGeometry args={[W - 0.10, 0.05, 0.030]} />
+                <meshStandardMaterial color={seam} roughness={0.6} metalness={0.55} />
+              </mesh>
+              <mesh position={[0, by, -D / 2 - 0.012]}>
+                <boxGeometry args={[W - 0.10, 0.05, 0.030]} />
+                <meshStandardMaterial color={seam} roughness={0.6} metalness={0.55} />
+              </mesh>
+            </group>
+          ))}
+
+          {/* OUTSIDE-AIR INTAKE HOOD (−X end) */}
+          <mesh position={[OA_X_MIN - 0.32, 0.30, 0]}>
+            <boxGeometry args={[0.70, H * 0.75, D - 0.45]} />
+            <meshStandardMaterial color={casingDark} roughness={0.55} metalness={0.5} />
+          </mesh>
+          {/* Rain hood drip-edge lip */}
+          <mesh position={[OA_X_MIN - 0.70, 0.30 + (H * 0.75) / 2 + 0.06, 0]}>
+            <boxGeometry args={[0.85, 0.08, D - 0.40]} />
+            <meshStandardMaterial color={casingDark} roughness={0.55} metalness={0.5} />
+          </mesh>
+          {/* Storm / bird-screen louvers on the OA hood (−X face) */}
+          {Array.from({ length: 11 }).map((_, ki) => {
+            const span = H * 0.68;
+            const ly = 0.30 - span / 2 + (ki / 10) * span;
+            return (
+              <mesh
+                key={`oalouv-${ki}`}
+                position={[OA_X_MIN - 0.66, ly, 0]}
+                rotation={[Math.PI / 9, 0, 0]}
+              >
+                <boxGeometry args={[0.06, 0.18, D - 0.55]} />
+                <meshStandardMaterial color={louver} roughness={0.7} metalness={0.4} />
+              </mesh>
+            );
+          })}
         </group>
-      ))}
+      )}
 
-      {/* Horizontal mid-band (visual panel reinforcement, two bands on tall casing) */}
-      {[H * 0.20, -H * 0.20].map((by, bi) => (
-        <group key={`hband-${bi}`}>
-          <mesh position={[0, by, D / 2 + 0.012]}>
-            <boxGeometry args={[W - 0.10, 0.05, 0.030]} />
-            <meshStandardMaterial color={seam} roughness={0.6} metalness={0.55} />
-          </mesh>
-          <mesh position={[0, by, -D / 2 - 0.012]}>
-            <boxGeometry args={[W - 0.10, 0.05, 0.030]} />
-            <meshStandardMaterial color={seam} roughness={0.6} metalness={0.55} />
-          </mesh>
+      {/* Outside-air damper just inside the OA hood — modulating
+          parallel-blade aluminum damper with end-mounted Belimo actuator.
+          Faces the OA stream (−X) so its actuator and linkage are visible
+          through the access door and louvers. */}
+      <OutsideAirDamper
+        position={[OA_X_MIN + 0.45, 0.30, 0]}
+        rotation={[0, 0, 0]}
+        width={D - 0.70}
+        height={H * 0.70}
+        blades={6}
+      />
+
+      {/* ─── RETURN-AIR DAMPER — mixing-box RA inlet ───
+          Opposed-blade RA damper at the mixing box on the −Z (back) face,
+          modulating opposite to the OA damper. Blue actuator distinguishes it
+          from the OA actuator; orange actuator variant used for relief. */}
+      <ReturnAirDamper
+        position={[OA_X_MIN + 1.10, 0.30, -D / 2 + 0.08]}
+        rotation={[0, Math.PI / 2, 0]}
+        width={H * 0.68}
+        height={H * 0.68}
+        blades={5}
+        open="auto"
+        relief={false}
+      />
+
+      {/* ─── ENTHALPY ENERGY-RECOVERY WHEEL — OA section ───
+          Rotary energy-recovery wheel (ERW-1) installed across the OA and
+          exhaust halves of the mixing box. The slowly rotating rotor transfers
+          enthalpy between the exhaust return air (bottom half) and the fresh
+          OA stream (top half), pre-conditioning outdoor air before it reaches
+          the preheat coil and filters. Only shown in cutaway so the internal
+          section is visible; not rendered when the casing is solid. */}
+      <RotaryEnergyWheel
+        position={[OA_X_MIN + 2.00, 0.30, 0]}
+        rotation={[0, 0, 0]}
+        diameter={H * 0.75}
+        depth={0.35}
+        rpm={14}
+        wheelType="enthalpy"
+        name="ahu:ERW-1"
+      />
+      {!cutaway && (
+        <Text
+          position={[OA_X_MIN + 2.00, 1.55, D / 2 + 0.034]}
+          fontSize={0.13}
+          color={'#1a1f24'}
+          anchorX="center"
+          anchorY="middle"
+        >
+          ENERGY RECOVERY WHEEL
+        </Text>
+      )}
+
+      {/* ─── PREHEAT HOT-WATER COIL — freeze-protection coil ───
+          Located between the OA damper and the pre-filter bank. Provides
+          freeze protection by pre-heating the entering mixed air when OAT
+          drops near freezing. PICV + modulating actuator on HWS connection. */}
+      <HotWaterHeatingCoil
+        position={[OA_X_MAX - 0.60, -0.05, 0]}
+        rotation={[0, 0, 0]}
+        width={D - 0.60}
+        height={H - 1.00}
+        depth={0.20}
+        rows={3}
+        valveColor="#c0392b"
+        name="ahu:COIL-HW-PREHEAT"
+      />
+      {!cutaway && (
+        <Text
+          position={[OA_X_MAX - 0.60, 1.55, D / 2 + 0.034]}
+          fontSize={0.13}
+          color={'#1a1f24'}
+          anchorX="center"
+          anchorY="middle"
+        >
+          PREHEAT COIL
+        </Text>
+      )}
+
+      {/* ─── PRE-FILTER + FINAL-FILTER SECTION ───
+          The −X (left) door stays closed (DP gauge mounted on it). The +X
+          (right) door is rendered as an open service cutaway revealing the
+          MERV-13 pleated filter rack so a trainee can identify the
+          cartridges, slide tracks, and spring clips.
+          Both pieces are part of the casing shell and disappear in cutaway. */}
+      {!cutaway && (
+        <group name="ahu:shell-filter-doors">
+          {/* Closed left door */}
+          <group key="filt-door-closed">
+            <mesh position={[FILT_X - 0.65, -0.10, D / 2 + 0.014]}>
+              <boxGeometry args={[1.10, H - 0.70, 0.025]} />
+              <meshStandardMaterial color={door} roughness={0.55} metalness={0.45} />
+            </mesh>
+            <mesh position={[FILT_X - 0.65 + 0.42, -0.10, D / 2 + 0.038]}>
+              <boxGeometry args={[0.14, 0.14, 0.05]} />
+              <meshStandardMaterial color={accent} roughness={0.45} metalness={0.7} />
+            </mesh>
+            {[-0.6, 0.6].map((hy, hi) => (
+              <mesh key={`fhinge-L-${hi}`} position={[FILT_X - 0.65 - 0.50, hy * 0.65, D / 2 + 0.032]}>
+                <boxGeometry args={[0.08, 0.14, 0.022]} />
+                <meshStandardMaterial color={accent} roughness={0.5} metalness={0.7} />
+              </mesh>
+            ))}
+          </group>
+          {/* Open service cutaway — right door removed, frame revealed */}
+          <group key="filt-cutaway">
+            {/* Door frame border (open hole) */}
+            {[
+              [FILT_X + 0.65, +(H - 0.70) / 2 + 0.04, 0.05, 1.18],
+              [FILT_X + 0.65, -(H - 0.70) / 2 - 0.04, 0.05, 1.18],
+              [FILT_X + 0.65 - 0.59, -0.10, H - 0.70 + 0.10, 0.05],
+              [FILT_X + 0.65 + 0.59, -0.10, H - 0.70 + 0.10, 0.05],
+            ].map((b, bi) => (
+              <mesh key={`fframe-${bi}`} position={[b[0], b[1], D / 2 + 0.014]}>
+                <boxGeometry args={[b[3], b[2], 0.030]} />
+                <meshStandardMaterial color={accent} roughness={0.55} metalness={0.7} />
+              </mesh>
+            ))}
+            {/* Open door swung to the side (parked against casing) */}
+            <mesh position={[FILT_X + 0.65 + 0.55, -0.10, D / 2 + 0.55]} rotation={[0, -Math.PI / 2.2, 0]}>
+              <boxGeometry args={[1.10, H - 0.70, 0.025]} />
+              <meshStandardMaterial color={door} roughness={0.55} metalness={0.45} />
+            </mesh>
+          </group>
         </group>
-      ))}
+      )}
+      {/* ─── MERV-8 PRE-FILTER BANK — upstream / left half of filter section ───
+          Flat-panel coarse-efficiency pre-filter protects the MERV-13 final
+          bank from loading prematurely. Positioned on the entering-air side
+          (−X) of the filter section, leaving room for the final bank on the +X. */}
+      <PreFilterBank
+        position={[FILT_X - 0.72, -0.05, 0]}
+        rotation={[0, 0, 0]}
+        width={D - 0.50}
+        height={H - 0.80}
+        depth={0.055}
+        cols={8}
+        rows={4}
+        name="ahu:PREFILT-AHU"
+      />
 
-      {/* ─── OUTSIDE-AIR INTAKE HOOD (−X end) ─── */}
-      <mesh position={[OA_X_MIN - 0.32, 0.30, 0]}>
-        <boxGeometry args={[0.70, H * 0.75, D - 0.45]} />
-        <meshStandardMaterial color={casingDark} roughness={0.55} metalness={0.5} />
-      </mesh>
-      {/* Rain hood drip-edge lip */}
-      <mesh position={[OA_X_MIN - 0.70, 0.30 + (H * 0.75) / 2 + 0.06, 0]}>
-        <boxGeometry args={[0.85, 0.08, D - 0.40]} />
-        <meshStandardMaterial color={casingDark} roughness={0.55} metalness={0.5} />
-      </mesh>
-      {/* Storm / bird-screen louvers on the OA hood (−X face) */}
-      {Array.from({ length: 11 }).map((_, ki) => {
-        const span = H * 0.68;
-        const ly = 0.30 - span / 2 + (ki / 10) * span;
-        return (
-          <mesh
-            key={`oalouv-${ki}`}
-            position={[OA_X_MIN - 0.66, ly, 0]}
-            rotation={[Math.PI / 9, 0, 0]}
+      {/* MERV-13 pleated filter bank inside the filter section.
+          Center the rack on the cabinet centerline and rotate so its airflow
+          axis aligns with cabinet +X (default). Width spans the full cabinet
+          depth Z (with side clearance), height fills most of the cabinet H. */}
+      <MervFilterBank
+        position={[FILT_X + 0.60, -0.05, 0]}
+        rotation={[0, 0, 0]}
+        width={D - 0.50}
+        height={H - 0.80}
+        depth={0.32}
+        cols={8}
+        rows={4}
+      />
+      {/* DP gauge + section stencil — door-mounted, hide with shell */}
+      {!cutaway && (
+        <group name="ahu:shell-filter-dp">
+          <mesh position={[FILT_X, 1.30, D / 2 + 0.030]} rotation={[0, 0, 0]}>
+            <cylinderGeometry args={[0.13, 0.13, 0.04, 16]} />
+            <meshStandardMaterial color={accent} roughness={0.4} metalness={0.7} />
+          </mesh>
+          <mesh position={[FILT_X, 1.30, D / 2 + 0.052]} rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.11, 0.11, 0.005, 16]} />
+            <meshStandardMaterial color={'#f2efe6'} roughness={0.2} metalness={0.05} />
+          </mesh>
+          <mesh position={[FILT_X, 1.30, D / 2 + 0.058]} rotation={[0, 0, Math.PI / 4]}>
+            <boxGeometry args={[0.012, 0.10, 0.005]} />
+            <meshStandardMaterial color={'#cc0000'} roughness={0.4} metalness={0.4} />
+          </mesh>
+          <Text
+            position={[FILT_X, 1.55, D / 2 + 0.034]}
+            fontSize={0.13}
+            color={'#1a1f24'}
+            anchorX="center"
+            anchorY="middle"
           >
-            <boxGeometry args={[0.06, 0.18, D - 0.55]} />
-            <meshStandardMaterial color={louver} roughness={0.7} metalness={0.4} />
-          </mesh>
-        );
-      })}
-
-      {/* ─── PRE-FILTER + FINAL-FILTER SECTION — twin access doors (+Z) ─── */}
-      {[FILT_X - 0.65, FILT_X + 0.65].map((dx, di) => (
-        <group key={`filt-door-${di}`}>
-          <mesh position={[dx, -0.10, D / 2 + 0.014]}>
-            <boxGeometry args={[1.10, H - 0.70, 0.025]} />
-            <meshStandardMaterial color={door} roughness={0.55} metalness={0.45} />
-          </mesh>
-          {/* Door handle */}
-          <mesh position={[dx + 0.42, -0.10, D / 2 + 0.038]}>
-            <boxGeometry args={[0.14, 0.14, 0.05]} />
-            <meshStandardMaterial color={accent} roughness={0.45} metalness={0.7} />
-          </mesh>
-          {/* Hinges */}
-          {[-0.6, 0.6].map((hy, hi) => (
-            <mesh key={`fhinge-${di}-${hi}`} position={[dx - 0.50, hy * 0.65, D / 2 + 0.032]}>
-              <boxGeometry args={[0.08, 0.14, 0.022]} />
-              <meshStandardMaterial color={accent} roughness={0.5} metalness={0.7} />
-            </mesh>
-          ))}
+            FILTER SECTION
+          </Text>
         </group>
-      ))}
-      {/* Differential-pressure gauge on the filter section (telltale of a real filter bank) */}
-      <mesh position={[FILT_X, 1.30, D / 2 + 0.030]} rotation={[0, 0, 0]}>
-        <cylinderGeometry args={[0.13, 0.13, 0.04, 16]} />
-        <meshStandardMaterial color={accent} roughness={0.4} metalness={0.7} />
-      </mesh>
-      <mesh position={[FILT_X, 1.30, D / 2 + 0.052]} rotation={[Math.PI / 2, 0, 0]}>
-        <cylinderGeometry args={[0.11, 0.11, 0.005, 16]} />
-        <meshStandardMaterial color={'#f2efe6'} roughness={0.2} metalness={0.05} />
-      </mesh>
-      <mesh position={[FILT_X, 1.30, D / 2 + 0.058]} rotation={[0, 0, Math.PI / 4]}>
-        <boxGeometry args={[0.012, 0.10, 0.005]} />
-        <meshStandardMaterial color={'#cc0000'} roughness={0.4} metalness={0.4} />
-      </mesh>
-      {/* "FILTER SECTION" stencil */}
-      <Text
-        position={[FILT_X, 1.55, D / 2 + 0.034]}
-        fontSize={0.13}
-        color={'#1a1f24'}
-        anchorX="center"
-        anchorY="middle"
-      >
-        FILTER SECTION
-      </Text>
+      )}
 
-      {/* ─── COOLING COIL SECTION — three access doors (+Z face) ─── */}
-      {[COIL_X - 1.55, COIL_X, COIL_X + 1.55].map((dx, di) => (
-        <group key={`coil-door-${di}`}>
-          <mesh position={[dx, -0.10, D / 2 + 0.014]}>
-            <boxGeometry args={[1.40, H - 0.70, 0.025]} />
-            <meshStandardMaterial color={door} roughness={0.55} metalness={0.45} />
-          </mesh>
-          {/* Sight glass on each door */}
-          <mesh position={[dx, 0.50, D / 2 + 0.030]}>
-            <boxGeometry args={[0.55, 0.40, 0.014]} />
-            <meshStandardMaterial color={'#1c2530'} roughness={0.15} metalness={0.2} transparent opacity={0.45} />
-          </mesh>
-          <mesh position={[dx, 0.50, D / 2 + 0.024]}>
-            <boxGeometry args={[0.62, 0.46, 0.014]} />
-            <meshStandardMaterial color={accent} roughness={0.5} metalness={0.7} />
-          </mesh>
-          {/* Handle */}
-          <mesh position={[dx + 0.55, -0.10, D / 2 + 0.038]}>
-            <boxGeometry args={[0.14, 0.14, 0.05]} />
-            <meshStandardMaterial color={accent} roughness={0.45} metalness={0.7} />
-          </mesh>
-          {/* Hinges */}
-          {[-0.6, 0.6].map((hy, hi) => (
-            <mesh key={`chinge-${di}-${hi}`} position={[dx - 0.65, hy * 0.65, D / 2 + 0.032]}>
-              <boxGeometry args={[0.08, 0.14, 0.022]} />
-              <meshStandardMaterial color={accent} roughness={0.5} metalness={0.7} />
-            </mesh>
+      {/* ─── COOLING COIL SECTION ───
+          Two outer access doors stay closed (sight glass on each); the
+          middle door is rendered as an open service cutaway revealing the
+          chilled-water cooling coil — copper hairpin returns, aluminum fin
+          pack, vertical headers, and condensate drain pan all visible.
+          The doors / frames are part of the casing and disappear in cutaway. */}
+      {!cutaway && (
+        <group name="ahu:shell-coil-doors">
+          {[COIL_X - 1.55, COIL_X + 1.55].map((dx, di) => (
+            <group key={`coil-door-closed-${di}`}>
+              <mesh position={[dx, -0.10, D / 2 + 0.014]}>
+                <boxGeometry args={[1.40, H - 0.70, 0.025]} />
+                <meshStandardMaterial color={door} roughness={0.55} metalness={0.45} />
+              </mesh>
+              {/* Sight glass on each door */}
+              <mesh position={[dx, 0.50, D / 2 + 0.030]}>
+                <boxGeometry args={[0.55, 0.40, 0.014]} />
+                <meshStandardMaterial color={'#1c2530'} roughness={0.15} metalness={0.2} transparent opacity={0.45} />
+              </mesh>
+              <mesh position={[dx, 0.50, D / 2 + 0.024]}>
+                <boxGeometry args={[0.62, 0.46, 0.014]} />
+                <meshStandardMaterial color={accent} roughness={0.5} metalness={0.7} />
+              </mesh>
+              {/* Handle */}
+              <mesh position={[dx + 0.55, -0.10, D / 2 + 0.038]}>
+                <boxGeometry args={[0.14, 0.14, 0.05]} />
+                <meshStandardMaterial color={accent} roughness={0.45} metalness={0.7} />
+              </mesh>
+              {/* Hinges */}
+              {[-0.6, 0.6].map((hy, hi) => (
+                <mesh key={`chinge-${di}-${hi}`} position={[dx - 0.65, hy * 0.65, D / 2 + 0.032]}>
+                  <boxGeometry args={[0.08, 0.14, 0.022]} />
+                  <meshStandardMaterial color={accent} roughness={0.5} metalness={0.7} />
+                </mesh>
+              ))}
+            </group>
           ))}
+          {/* Middle coil door cutaway — open frame + parked door */}
+          <group key="coil-door-cutaway">
+            {[
+              [COIL_X, +(H - 0.70) / 2 + 0.04, 0.05, 1.48],
+              [COIL_X, -(H - 0.70) / 2 - 0.04, 0.05, 1.48],
+              [COIL_X - 0.74, -0.10, H - 0.70 + 0.10, 0.05],
+              [COIL_X + 0.74, -0.10, H - 0.70 + 0.10, 0.05],
+            ].map((b, bi) => (
+              <mesh key={`cframe-${bi}`} position={[b[0], b[1], D / 2 + 0.014]}>
+                <boxGeometry args={[b[3], b[2], 0.030]} />
+                <meshStandardMaterial color={accent} roughness={0.55} metalness={0.7} />
+              </mesh>
+            ))}
+            {/* Open door parked +X-side */}
+            <mesh position={[COIL_X + 0.70, -0.10, D / 2 + 0.55]} rotation={[0, -Math.PI / 2.2, 0]}>
+              <boxGeometry args={[1.40, H - 0.70, 0.025]} />
+              <meshStandardMaterial color={door} roughness={0.55} metalness={0.45} />
+            </mesh>
+          </group>
         </group>
-      ))}
-      <Text
-        position={[COIL_X, 1.55, D / 2 + 0.034]}
-        fontSize={0.16}
-        color={'#1a1f24'}
-        anchorX="center"
-        anchorY="middle"
-      >
-        CHILLED WATER COOLING COIL
-      </Text>
+      )}
+      {/* Chilled-water cooling coil (copper / aluminum) inside the coil section */}
+      <ChwCopperCoil
+        position={[COIL_X, -0.05, 0]}
+        rotation={[0, 0, 0]}
+        width={D - 0.60}
+        height={H - 1.00}
+        depth={0.42}
+        rows={8}
+      />
+      {!cutaway && (
+        <Text
+          position={[COIL_X, 1.55, D / 2 + 0.034]}
+          fontSize={0.16}
+          color={'#1a1f24'}
+          anchorX="center"
+          anchorY="middle"
+        >
+          CHILLED WATER COOLING COIL
+        </Text>
+      )}
       {/* Auto air vents at coil header high points (pid air_management) */}
       <AirVent
         position={[COIL_X - 0.9, H / 2 - 0.35, D / 2 + 0.22]}
@@ -889,66 +1276,87 @@ function RooftopAHU({ position }: { position: [number, number, number] }) {
         pipeRadius={0.12}
       />
 
-      {/* ─── FAN SECTION — twin centrifugal blowers behind screened access ─── */}
-      {[FAN_X - 0.75, FAN_X + 0.75].map((dx, di) => (
-        <group key={`fan-grille-${di}`}>
-          <mesh position={[dx, 0.0, D / 2 + 0.014]}>
-            <boxGeometry args={[1.20, H - 0.70, 0.025]} />
-            <meshStandardMaterial color={door} roughness={0.55} metalness={0.45} />
-          </mesh>
-          {/* Cut-out frame */}
-          <mesh position={[dx, 0.0, D / 2 + 0.030]}>
-            <boxGeometry args={[1.00, H - 1.10, 0.014]} />
-            <meshStandardMaterial color={accent} roughness={0.5} metalness={0.7} />
-          </mesh>
-          {/* Dark recess behind grille */}
-          <mesh position={[dx, 0.0, D / 2 + 0.020]}>
-            <boxGeometry args={[0.94, H - 1.18, 0.014]} />
-            <meshStandardMaterial color={grille} roughness={0.95} metalness={0.0} />
-          </mesh>
-          {/* Horizontal bird-screen bars */}
-          {Array.from({ length: 14 }).map((_, gi) => (
-            <mesh
-              key={`fanbar-${di}-${gi}`}
-              position={[dx, -((H - 1.20) / 2) + gi * ((H - 1.20) / 13), D / 2 + 0.038]}
-            >
-              <boxGeometry args={[0.96, 0.014, 0.010]} />
-              <meshStandardMaterial color={'#3a3a3a'} roughness={0.6} metalness={0.6} />
-            </mesh>
+      {/* ─── STEAM HUMIDIFIER — between coil and fan sections ───
+          Steam-grid manifold with 7 vertical dispersion tubes projects into
+          the supply-air stream immediately downstream of the cooling coil,
+          before the supply fan. Maintains space relative humidity per BMS
+          setpoint. Modulating control valve + safety shutoff solenoid on the
+          insulated steam supply riser. */}
+      <SteamHumidifier
+        position={[COIL_X_MAX - 0.50, -0.10, 0]}
+        rotation={[0, 0, 0]}
+        width={D - 0.60}
+        tubeHeight={H - 1.20}
+        tubes={7}
+        name="ahu:HUM-1"
+      />
+      {!cutaway && (
+        <Text
+          position={[COIL_X_MAX - 0.50, 1.55, D / 2 + 0.034]}
+          fontSize={0.13}
+          color={'#1a1f24'}
+          anchorX="center"
+          anchorY="middle"
+        >
+          STEAM HUMIDIFIER
+        </Text>
+      )}
+
+      {/* ─── FAN SECTION — screened access doors (shell, hide in cutaway) ─── */}
+      {!cutaway && (
+        <group name="ahu:shell-fan-doors">
+          {[FAN_X - 0.75, FAN_X + 0.75].map((dx, di) => (
+            <group key={`fan-grille-${di}`}>
+              <mesh position={[dx, 0.0, D / 2 + 0.014]}>
+                <boxGeometry args={[1.20, H - 0.70, 0.025]} />
+                <meshStandardMaterial color={door} roughness={0.55} metalness={0.45} />
+              </mesh>
+              {/* Cut-out frame */}
+              <mesh position={[dx, 0.0, D / 2 + 0.030]}>
+                <boxGeometry args={[1.00, H - 1.10, 0.014]} />
+                <meshStandardMaterial color={accent} roughness={0.5} metalness={0.7} />
+              </mesh>
+              {/* Dark recess behind grille */}
+              <mesh position={[dx, 0.0, D / 2 + 0.020]}>
+                <boxGeometry args={[0.94, H - 1.18, 0.014]} />
+                <meshStandardMaterial color={grille} roughness={0.95} metalness={0.0} />
+              </mesh>
+              {/* Horizontal bird-screen bars */}
+              {Array.from({ length: 14 }).map((_, gi) => (
+                <mesh
+                  key={`fanbar-${di}-${gi}`}
+                  position={[dx, -((H - 1.20) / 2) + gi * ((H - 1.20) / 13), D / 2 + 0.038]}
+                >
+                  <boxGeometry args={[0.96, 0.014, 0.010]} />
+                  <meshStandardMaterial color={'#3a3a3a'} roughness={0.6} metalness={0.6} />
+                </mesh>
+              ))}
+            </group>
           ))}
         </group>
-      ))}
-      {/* Twin centrifugal blowers (rotating wheels visible behind grilles) */}
-      {[
-        { ref: blowerARef, x: FAN_X - 0.75 },
-        { ref: blowerBRef, x: FAN_X + 0.75 },
-      ].map((b, bi) => (
-        <group key={`blower-${bi}`} ref={b.ref} position={[b.x, 0.0, D / 2 - 0.30]}>
-          <mesh>
-            <cylinderGeometry args={[0.55, 0.55, 0.95, 28]} />
-            <meshStandardMaterial color={'#1d1f23'} roughness={0.5} metalness={0.6} />
-          </mesh>
-          {Array.from({ length: 22 }).map((_, ji) => {
-            const ang = (ji / 22) * Math.PI * 2;
-            return (
-              <mesh
-                key={`bblade-${bi}-${ji}`}
-                position={[Math.cos(ang) * 0.50, 0, Math.sin(ang) * 0.50]}
-                rotation={[0, -ang, 0]}
-              >
-                <boxGeometry args={[0.04, 0.95, 0.18]} />
-                <meshStandardMaterial color={blower} roughness={0.45} metalness={0.55} />
-              </mesh>
-            );
-          })}
-          <mesh>
-            <cylinderGeometry args={[0.10, 0.10, 1.00, 12]} />
-            <meshStandardMaterial color={motorBlk} roughness={0.4} metalness={0.7} />
-          </mesh>
-        </group>
-      ))}
+      )}
+      {/* Twin DWDI housed centrifugal supply blowers sized for 500-ton /
+          200,000 CFM service. Wheel diameter 1.20 m, width 1.10 m.
+          Each blower handles 100,000 CFM at ~2.5" SP.
+          Inlet bell-mouths face ±Z (cross-cabinet plenum draw);
+          discharge collar points +Y into the discharge plenum above.
+          Components self-animate via their internal useFrame at 760 RPM. */}
+      <HousedCentrifugalBlower
+        position={[FAN_X - 1.00, -0.60, 0]}
+        rotation={[0, 0, 0]}
+        wheelDiameter={1.20}
+        wheelWidth={1.10}
+        rpm={760}
+      />
+      <HousedCentrifugalBlower
+        position={[FAN_X + 1.00, -0.60, 0]}
+        rotation={[0, 0, 0]}
+        wheelDiameter={1.20}
+        wheelWidth={1.10}
+        rpm={760}
+      />
       {/* VFD enclosures stacked on the −Z face of the fan section, one per blower */}
-      {[FAN_X - 0.75, FAN_X + 0.75].map((vx, vi) => (
+      {[FAN_X - 1.00, FAN_X + 1.00].map((vx, vi) => (
         <group key={`vfd-${vi}`} position={[vx, -0.85, -D / 2 - 0.10]}>
           <mesh castShadow>
             <boxGeometry args={[0.70, 1.30, 0.32]} />
@@ -965,74 +1373,99 @@ function RooftopAHU({ position }: { position: [number, number, number] }) {
         </group>
       ))}
 
-      {/* ─── DISCHARGE PLENUM END CAP (+X end) ─── */}
-      <mesh position={[DISC_X_MAX + 0.014, 0, 0]}>
-        <boxGeometry args={[0.030, H - 0.08, D - 0.08]} />
-        <meshStandardMaterial color={casingDark} roughness={0.55} metalness={0.5} />
-      </mesh>
-      {/* Test port covers on discharge end */}
-      {[-0.8, -0.3, 0.3, 0.8].map((py, pi) => (
-        <mesh key={`tport-${pi}`} position={[DISC_X_MAX + 0.034, py, 0]} rotation={[0, 0, Math.PI / 2]}>
-          <cylinderGeometry args={[0.07, 0.07, 0.025, 12]} />
-          <meshStandardMaterial color={accent} roughness={0.4} metalness={0.8} />
-        </mesh>
-      ))}
+      {/* ─── DS-AHU service disconnect ───
+          NEMA-3R fused safety switch mounted on the −Z face of the FAN
+          section, between the two VFDs. Per pid spec + NEC 430, this
+          provides a positive lock-off "within sight of the supply-fan
+          motor" (OSHA 1910.147 LOTO point). Door faces −Z (outward away
+          from cabinet). Inspect-registry pattern 'electrical:DS-AHU' is
+          baked into the component's group name. */}
+      <ServiceDisconnect
+        position={[FAN_X, 0.50, -D / 2 - 0.18]}
+        rotation={[0, Math.PI / 2, 0]}
+        width={0.55}
+        height={0.95}
+        depth={0.28}
+        state={'on'}
+        tag={'DS-AHU-1'}
+        rating={'480V 3PH 100A FUSED'}
+      />
 
-      {/* ─── DISCONNECT SWITCH / CONTROL ENCLOSURE on +Z face (discharge end) ─── */}
-      <group position={[DISC_X_MIN - 0.20, -0.40, D / 2 + 0.13]}>
-        <mesh castShadow>
-          <boxGeometry args={[1.00, 1.50, 0.32]} />
-          <meshStandardMaterial color={'#3a3a38'} roughness={0.5} metalness={0.4} />
-        </mesh>
-        {/* Door */}
-        <mesh position={[0, 0, 0.18]}>
-          <boxGeometry args={[0.88, 1.40, 0.014]} />
-          <meshStandardMaterial color={'#2a2a28'} roughness={0.5} metalness={0.5} />
-        </mesh>
-        {/* Operating handle */}
-        <mesh position={[0.35, 0.45, 0.205]}>
-          <boxGeometry args={[0.10, 0.32, 0.06]} />
-          <meshStandardMaterial color={safetyYel} roughness={0.5} metalness={0.4} />
-        </mesh>
-        {/* Run LED (green, pulsing) */}
-        <mesh position={[-0.22, 0.55, 0.205]}>
-          <sphereGeometry args={[0.06, 12, 8]} />
-          <meshStandardMaterial
-            ref={runLedRef}
-            color={'#33ff66'}
-            emissive={'#00cc44'}
-            emissiveIntensity={1.4}
-          />
-        </mesh>
-        {/* Comm / status LED (amber) */}
-        <mesh position={[-0.22, 0.32, 0.205]}>
-          <sphereGeometry args={[0.05, 12, 8]} />
-          <meshStandardMaterial
-            ref={alarmLedRef}
-            color={'#ffaa22'}
-            emissive={'#ff8800'}
-            emissiveIntensity={0.8}
-          />
-        </mesh>
-        {/* Fault LED (steady red) */}
-        <mesh position={[-0.22, 0.12, 0.205]}>
-          <sphereGeometry args={[0.05, 12, 8]} />
-          <meshStandardMaterial color={'#ff3333'} emissive={'#ff0000'} emissiveIntensity={0.6} />
-        </mesh>
-        {/* Local HMI faceplate */}
-        <mesh position={[0.05, -0.20, 0.205]}>
-          <boxGeometry args={[0.55, 0.40, 0.012]} />
-          <meshStandardMaterial color={'#001a14'} emissive={'#003a28'} emissiveIntensity={0.4} />
-        </mesh>
-        {/* Nameplate */}
-        <mesh position={[0, -0.62, 0.205]}>
-          <boxGeometry args={[0.70, 0.18, 0.006]} />
-          <meshStandardMaterial color={'#d8d8d8'} roughness={0.4} metalness={0.85} />
-        </mesh>
-        <Text position={[0, -0.62, 0.213]} fontSize={0.075} color={'#0a0a0a'} anchorX="center" anchorY="middle">
-          AHU-1 CONTROL
-        </Text>
-      </group>
+      {/* ─── DISCHARGE PLENUM END CAP (+X end) — shell, hide in cutaway ─── */}
+      {!cutaway && (
+        <group name="ahu:shell-discharge-end">
+          <mesh position={[DISC_X_MAX + 0.014, 0, 0]}>
+            <boxGeometry args={[0.030, H - 0.08, D - 0.08]} />
+            <meshStandardMaterial color={casingDark} roughness={0.55} metalness={0.5} />
+          </mesh>
+          {[-0.8, -0.3, 0.3, 0.8].map((py, pi) => (
+            <mesh key={`tport-${pi}`} position={[DISC_X_MAX + 0.034, py, 0]} rotation={[0, 0, Math.PI / 2]}>
+              <cylinderGeometry args={[0.07, 0.07, 0.025, 12]} />
+              <meshStandardMaterial color={accent} roughness={0.4} metalness={0.8} />
+            </mesh>
+          ))}
+        </group>
+      )}
+
+      {/* ─── LOCAL CONTROL / HMI ENCLOSURE on +Z face (discharge end) ───
+          Door-mounted on the casing, so we hide the whole thing in cutaway
+          rather than leaving it floating in mid-air. */}
+      {!cutaway && (
+        <group position={[DISC_X_MIN - 0.20, -0.40, D / 2 + 0.13]} name="ahu:shell-control-enclosure">
+          <mesh castShadow>
+            <boxGeometry args={[1.00, 1.50, 0.32]} />
+            <meshStandardMaterial color={'#3a3a38'} roughness={0.5} metalness={0.4} />
+          </mesh>
+          {/* Door */}
+          <mesh position={[0, 0, 0.18]}>
+            <boxGeometry args={[0.88, 1.40, 0.014]} />
+            <meshStandardMaterial color={'#2a2a28'} roughness={0.5} metalness={0.5} />
+          </mesh>
+          {/* Operating handle */}
+          <mesh position={[0.35, 0.45, 0.205]}>
+            <boxGeometry args={[0.10, 0.32, 0.06]} />
+            <meshStandardMaterial color={safetyYel} roughness={0.5} metalness={0.4} />
+          </mesh>
+          {/* Run LED (green, pulsing) */}
+          <mesh position={[-0.22, 0.55, 0.205]}>
+            <sphereGeometry args={[0.06, 12, 8]} />
+            <meshStandardMaterial
+              ref={runLedRef}
+              color={'#33ff66'}
+              emissive={'#00cc44'}
+              emissiveIntensity={1.4}
+            />
+          </mesh>
+          {/* Comm / status LED (amber) */}
+          <mesh position={[-0.22, 0.32, 0.205]}>
+            <sphereGeometry args={[0.05, 12, 8]} />
+            <meshStandardMaterial
+              ref={alarmLedRef}
+              color={'#ffaa22'}
+              emissive={'#ff8800'}
+              emissiveIntensity={0.8}
+            />
+          </mesh>
+          {/* Fault LED (steady red) */}
+          <mesh position={[-0.22, 0.12, 0.205]}>
+            <sphereGeometry args={[0.05, 12, 8]} />
+            <meshStandardMaterial color={'#ff3333'} emissive={'#ff0000'} emissiveIntensity={0.6} />
+          </mesh>
+          {/* Local HMI faceplate */}
+          <mesh position={[0.05, -0.20, 0.205]}>
+            <boxGeometry args={[0.55, 0.40, 0.012]} />
+            <meshStandardMaterial color={'#001a14'} emissive={'#003a28'} emissiveIntensity={0.4} />
+          </mesh>
+          {/* Nameplate */}
+          <mesh position={[0, -0.62, 0.205]}>
+            <boxGeometry args={[0.70, 0.18, 0.006]} />
+            <meshStandardMaterial color={'#d8d8d8'} roughness={0.4} metalness={0.85} />
+          </mesh>
+          <Text position={[0, -0.62, 0.213]} fontSize={0.075} color={'#0a0a0a'} anchorX="center" anchorY="middle">
+            AHU-1 CONTROL
+          </Text>
+        </group>
+      )}
 
       {/* ─── ROOFTOP MAINTENANCE WALKWAY along +Z side ─── */}
       <mesh position={[0, H / 2 + 0.10, D / 2 + 0.55]} castShadow>
@@ -1153,52 +1586,60 @@ function RooftopAHU({ position }: { position: [number, number, number] }) {
         })}
       </group>
 
-      {/* ─── EQUIPMENT LABEL on +Z face (camera-facing) ─── */}
-      <Text
-        position={[0, 1.85, D / 2 + 0.04]}
-        fontSize={0.55}
-        color={'#1a1f24'}
-        anchorX="center"
-        anchorY="middle"
-        outlineColor={'#ffffff'}
-        outlineWidth={0.018}
-      >
-        AIR HANDLER
-      </Text>
-      <Text
-        position={[0, 1.30, D / 2 + 0.04]}
-        fontSize={0.26}
-        color={'#1a1f24'}
-        anchorX="center"
-        anchorY="middle"
-      >
-        AHU-1
-      </Text>
+      {/* ─── EQUIPMENT LABEL + NAMEPLATE — stencilled on the casing skin,
+          hide with the shell so they aren't floating in mid-air. ─── */}
+      {!cutaway && (
+        <group name="ahu:shell-labels">
+          {/* Camera-facing AIR HANDLER stencil on +Z face */}
+          <Text
+            position={[0, 1.85, D / 2 + 0.04]}
+            fontSize={0.55}
+            color={'#1a1f24'}
+            anchorX="center"
+            anchorY="middle"
+            outlineColor={'#ffffff'}
+            outlineWidth={0.018}
+          >
+            AIR HANDLER
+          </Text>
+          <Text
+            position={[0, 1.30, D / 2 + 0.04]}
+            fontSize={0.26}
+            color={'#1a1f24'}
+            anchorX="center"
+            anchorY="middle"
+          >
+            AHU-1
+          </Text>
 
-      {/* ─── NAMEPLATE on -Z face (back side, visible from rooftop walkway) ─── */}
-      <mesh position={[OA_X + 1.0, -0.75, -D / 2 - 0.014]}>
-        <boxGeometry args={[1.10, 0.65, 0.025]} />
-        <meshStandardMaterial color={'#d8d8d8'} roughness={0.4} metalness={0.85} />
-      </mesh>
-      <Text position={[OA_X + 1.0, -0.55, -D / 2 - 0.029]} rotation={[0, Math.PI, 0]} fontSize={0.11} color={'#0a0a0a'} anchorX="center" anchorY="middle">
-        AHU-1
-      </Text>
-      <Text position={[OA_X + 1.0, -0.72, -D / 2 - 0.029]} rotation={[0, Math.PI, 0]} fontSize={0.075} color={'#0a0a0a'} anchorX="center" anchorY="middle">
-        MODEL DSH-220
-      </Text>
-      <Text position={[OA_X + 1.0, -0.85, -D / 2 - 0.029]} rotation={[0, Math.PI, 0]} fontSize={0.060} color={'#0a0a0a'} anchorX="center" anchorY="middle">
-        200,000 CFM @ 3.5" SP
-      </Text>
-      <Text position={[OA_X + 1.0, -0.95, -D / 2 - 0.029]} rotation={[0, Math.PI, 0]} fontSize={0.055} color={'#0a0a0a'} anchorX="center" anchorY="middle">
-        500 TON CHW LOAD
-      </Text>
-      <Text position={[OA_X + 1.0, -1.04, -D / 2 - 0.029]} rotation={[0, Math.PI, 0]} fontSize={0.048} color={'#0a0a0a'} anchorX="center" anchorY="middle">
-        SN: AH-2024-0118
-      </Text>
+          {/* Nameplate on -Z face */}
+          <mesh position={[OA_X + 1.0, -0.75, -D / 2 - 0.014]}>
+            <boxGeometry args={[1.10, 0.65, 0.025]} />
+            <meshStandardMaterial color={'#d8d8d8'} roughness={0.4} metalness={0.85} />
+          </mesh>
+          <Text position={[OA_X + 1.0, -0.55, -D / 2 - 0.029]} rotation={[0, Math.PI, 0]} fontSize={0.11} color={'#0a0a0a'} anchorX="center" anchorY="middle">
+            AHU-1
+          </Text>
+          <Text position={[OA_X + 1.0, -0.72, -D / 2 - 0.029]} rotation={[0, Math.PI, 0]} fontSize={0.075} color={'#0a0a0a'} anchorX="center" anchorY="middle">
+            MODEL DSH-220
+          </Text>
+          <Text position={[OA_X + 1.0, -0.85, -D / 2 - 0.029]} rotation={[0, Math.PI, 0]} fontSize={0.060} color={'#0a0a0a'} anchorX="center" anchorY="middle">
+            200,000 CFM @ 3.5" SP
+          </Text>
+          <Text position={[OA_X + 1.0, -0.95, -D / 2 - 0.029]} rotation={[0, Math.PI, 0]} fontSize={0.055} color={'#0a0a0a'} anchorX="center" anchorY="middle">
+            500 TON CHW LOAD
+          </Text>
+          <Text position={[OA_X + 1.0, -1.04, -D / 2 - 0.029]} rotation={[0, Math.PI, 0]} fontSize={0.048} color={'#0a0a0a'} anchorX="center" anchorY="middle">
+            SN: AH-2024-0118
+          </Text>
+        </group>
+      )}
 
-      {/* Floating overhead label (mirrors cooling-tower style) */}
+      {/* Floating overhead label — kept in cutaway so the unit still reads
+          as AHU-1 from across the rooftop, with a "CUTAWAY" annotation when
+          the shell is hidden so it's obvious this is an x-ray view. */}
       <Text position={[0, H / 2 + 1.95, 0]} fontSize={0.42} color="#ffffff" anchorX="center" anchorY="middle">
-        AHU-1
+        {cutaway ? 'AHU-1 — CUTAWAY' : 'AHU-1'}
       </Text>
     </group>
   );
@@ -1801,6 +2242,14 @@ function EngineRoom({
   onVfdZoom,
   vfdLookAtRef,
   vfdZoomed,
+  onCdwpVfdZoom,
+  onChwpVfdZoom,
+  cdwpVfdZoomed,
+  chwpVfdZoomed,
+  cdwpVfdLookAtRef,
+  chwpVfdLookAtRef,
+  cdwpVfdCamPosRef,
+  chwpVfdCamPosRef,
 }: {
   onHmiZoom: () => void;
   hmiLookAtRef: MutableRefObject<THREE.Vector3>;
@@ -1808,10 +2257,70 @@ function EngineRoom({
   onVfdZoom: () => void;
   vfdLookAtRef: MutableRefObject<THREE.Vector3>;
   vfdZoomed: boolean;
+  onCdwpVfdZoom: () => void;
+  onChwpVfdZoom: () => void;
+  cdwpVfdZoomed: boolean;
+  chwpVfdZoomed: boolean;
+  cdwpVfdLookAtRef: MutableRefObject<THREE.Vector3>;
+  chwpVfdLookAtRef: MutableRefObject<THREE.Vector3>;
+  cdwpVfdCamPosRef: MutableRefObject<THREE.Vector3>;
+  chwpVfdCamPosRef: MutableRefObject<THREE.Vector3>;
 }) {
+  const vfdOccluderRef = useRef<THREE.Mesh>(null);
+
+  /* ── Pump VFD screen anchor refs + look-at + camera-pose updater ─────────
+     The panel anchor inside <Ach580Drive/> has rotation [0, π/2, 0] so its
+     local +Z axis faces the drive's front cover. After the cabinet's own
+     rotation is applied, the anchor's WORLD quaternion encodes exactly
+     which way the panel is facing in the engine room — we extract the
+     world-space "panel-out" vector from it and offset the camera along
+     that vector by a fixed standoff distance. This is what guarantees
+     the click-to-zoom always lands the camera squarely in front of the
+     ABB control panel rather than zooming "into the wall". */
+  const cdwpVfdScreenAnchorRef = useRef<THREE.Group>(null);
+  const chwpVfdScreenAnchorRef = useRef<THREE.Group>(null);
+  const cdwpVfdOccluderRef     = useRef<THREE.Mesh>(null);
+  const chwpVfdOccluderRef     = useRef<THREE.Mesh>(null);
+  /* Standoff matched to the ACP's enlarged 0.30 m world height (see
+     Ach580Drive.tsx → ACP_WORLD_H). At ~0.42 m the panel fills roughly
+     two-thirds of the vertical viewport on a 78° FOV — close enough for
+     every key (HAND/OFF/AUTO/START/STOP/menu) to be a comfortable mouse
+     click target while still leaving the surrounding drive face visible
+     for context. */
+  const VFD_ZOOM_STANDOFF  = 0.42;   // metres in front of the ACP face
+  const VFD_ZOOM_TILT_DOWN = 0.020;  // small tilt-down for natural reading angle
+  const _quat   = useRef(new THREE.Quaternion()).current;
+  const _fwd    = useRef(new THREE.Vector3()).current;
+  useFrame(() => {
+    if (cdwpVfdScreenAnchorRef.current) {
+      cdwpVfdScreenAnchorRef.current.getWorldPosition(cdwpVfdLookAtRef.current);
+      cdwpVfdScreenAnchorRef.current.getWorldQuaternion(_quat);
+      _fwd.set(0, 0, 1).applyQuaternion(_quat);
+      cdwpVfdCamPosRef.current
+        .copy(cdwpVfdLookAtRef.current)
+        .addScaledVector(_fwd, VFD_ZOOM_STANDOFF);
+      cdwpVfdCamPosRef.current.y += VFD_ZOOM_TILT_DOWN;
+    }
+    if (chwpVfdScreenAnchorRef.current) {
+      chwpVfdScreenAnchorRef.current.getWorldPosition(chwpVfdLookAtRef.current);
+      chwpVfdScreenAnchorRef.current.getWorldQuaternion(_quat);
+      _fwd.set(0, 0, 1).applyQuaternion(_quat);
+      chwpVfdCamPosRef.current
+        .copy(chwpVfdLookAtRef.current)
+        .addScaledVector(_fwd, VFD_ZOOM_STANDOFF);
+      chwpVfdCamPosRef.current.y += VFD_ZOOM_TILT_DOWN;
+    }
+  });
+
   const compressorRunning = useSimulationStore((s) => s.state.compressorRunning);
   const condenserWaterFlowing = useSimulationStore((s) => s.state.condenserWaterFlowing);
   const evaporatorWaterFlowing = useSimulationStore((s) => s.state.evaporatorWaterFlowing);
+  /* Animated-arrow gates: true only when the master loop flag is set AND
+     every isolation valve along the loop's hydraulic path is open.
+     Closing any one valve in a loop instantly hides every arrow on that
+     loop (mirroring real-plant dead-head behaviour). */
+  const cdwLoopFlowing = useCdwLoopFlowing();
+  const chwLoopFlowing = useChwLoopFlowing();
   /* Live shell tints sampled by ChillerModel from the baked GLB textures.
      Subscribed here (not inside the barrel-head IIFE) so EngineRoom re-renders
      once when the colours resolve, after which the procedural weld-necks
@@ -1877,7 +2386,12 @@ function EngineRoom({
      overhead at code-compliant headroom (>2.4m / 8ft AFF; here ~9m for
      clearance over the chiller, walkways, and pumps). All elbows are
      long-radius (centerline R = 1.5 D). */
-  /** 17–18" Sch.40 main — single outer radius for straights, elbows (torus tube), and fittings. */
+  // Pipe sizing: YORK YK 500-ton chiller, CDW flow ≈ 1,500 GPM @ 3 GPM/ton.
+  // 18" Sch.40 carbon steel OD = 457 mm → pipe radius ≈ 0.22 m is correct
+  // for this duty. Velocity = 1500 GPM / (π × 0.203² m²) ≈ 1.8 m/s (5.9 fps)
+  // — within the 4–8 fps recommended range for condenser water mains.
+  // Note: comments elsewhere claim 24" pipe but geometry correctly uses 18".
+  /** 18" Sch.40 CDW / 16" CHW main — single outer radius for straights, elbows, and fittings. */
   const MAIN_PIPE_RADIUS = 0.22;
   const MAIN_PIPE_INS_RADIUS = MAIN_PIPE_RADIUS + 0.07; // ~7 cm closed-cell jacket per ASHRAE 90.1
   // CHW (chilled water) — YORK YK 2-pass marine waterbox convention:
@@ -1913,15 +2427,26 @@ function EngineRoom({
   const CW_Y_ROOF_TOP   = 12.55;             // horizontal main elevation on roof
   const CW_TOWER_X      =  25;               // cooling tower position X
   const CW_TOWER_Z      = (CW_Z_SUPPLY + CW_Z_RETURN) / 2;  // 6.175 — tower-curb Z
-  // Tower side-flange world positions (set by RooftopCoolingTower component).
-  // Local Z offsets (-0.575 supply, +0.575 return) snap exactly to CW_Z_SUPPLY
-  // and CW_Z_RETURN because CW_TOWER_Z is the average of those.
-  const CW_TOWER_FLG_Y_SUP = 14.68 + 2.20;   // 16.88 (green / supply)
-  const CW_TOWER_FLG_Y_RET = 14.68 + 2.04;   // 16.72 (return)
-  const CW_TOWER_FLG_X     = CW_TOWER_X - 2.0;        // 23.0 — outer face of tower (-X)
-  const CW_TOWER_FLG_Z_SUP = CW_TOWER_Z - 0.575;      // = CW_Z_SUPPLY
-  const CW_TOWER_FLG_Z_RET = CW_TOWER_Z + 0.575;      // = CW_Z_RETURN
+
+  // ── CORRECTED COUNTERFLOW CONNECTIONS ──────────────────────────────────────
+  // Supply (hot CWS IN): enters tower TOP through fan deck into distribution
+  //   header. Stub at local [-(W/4), FAN_DECK_TOP+0.30, -0.575] →
+  //   world X = 25 − 1.0 = 24.0, world Y = 14.68 + 2.42 + 0.06 = 17.16,
+  //   world Z = CW_Z_SUPPLY = 5.60. Pipe arrives from ABOVE (vertical drop).
+  // Return (cold CWR OUT): exits tower BASIN on −X face at basin bottom.
+  //   Stub at local [−W/2, BASIN_BOT+0.45, +0.575] →
+  //   world X = 23.0 (−X face), world Y = 14.68 − 2.05 = 12.63, Z = 6.725.
+  const CW_TOWER_SUP_X  = CW_TOWER_X - 1.0;  // 24.0 — supply inlet X (top, thru deck)
+  const CW_TOWER_SUP_Y  = 14.68 + 2.42 + 0.06; // 17.16 — supply flange world Y (top of fan deck)
+  const CW_TOWER_SUP_Z  = CW_Z_SUPPLY;        // 5.60 — supply vertical riser Z
+  const CW_TOWER_FLG_X  = CW_TOWER_X - 2.0;  // 23.0 — −X face of tower (return outlet)
+  const CW_TOWER_RET_Y  = 14.68 + (-2.50 + 0.45); // 12.63 — return flange world Y (basin)
+  const CW_TOWER_FLG_Z_SUP = CW_Z_SUPPLY;     // supply Z (same as riser)
+  const CW_TOWER_FLG_Z_RET = CW_Z_RETURN;     // return Z (same as riser)
   void CW_TOWER_FLG_Z_SUP; void CW_TOWER_FLG_Z_RET;   // documentation aliases
+  // Legacy aliases kept for flow-marker references below
+  const CW_TOWER_FLG_Y_SUP = CW_TOWER_SUP_Y;
+  const CW_TOWER_FLG_Y_RET = CW_TOWER_RET_Y;
 
   /* Z positions where lateral barrel-stubs terminate — both keyed to the
      actual barrel end faces (not the legacy flat dished head plates) so
@@ -1930,21 +2455,45 @@ function EngineRoom({
   const CW_STUB_Z_IN  =  COND_HEAD_Z;        // +4.760 — condenser barrel +Z end face
 
   /* ─── ROOFTOP AIR-HANDLING UNIT (AHU-1) ───
-     Built-up cabinet sized to load up the full 500-ton chiller. Centered
-     between the two CHW pipes in Z so the chilled-water risers come
-     straight up under the cooling-coil section. */
-  const AHU_X = -22;                         // unit center on roof
-  const AHU_W = 14.5;                        // casing width along X (must match RooftopAHU)
-  const AHU_D = 5.6;                         // casing depth along Z (must match RooftopAHU)
-  const AHU_Z = (CHW_Z_SUPPLY + CHW_Z_RETURN) / 2;
-  const AHU_H = 4.0;                         // casing height (must match RooftopAHU)
-  const AHU_BASE_Y = 12.55;                  // top of curb (deck y=12.05 + curb top 0.50)
-  const AHU_Y = AHU_BASE_Y + AHU_H / 2;      // 14.55 — center of casing in world Y
-  const AHU_TOP_Y = AHU_BASE_Y + AHU_H;      // 16.55 — top of casing
-  const AHU_EAST_X = AHU_X + AHU_W / 2;      // -14.75 — east (downstream) end face
-  const AHU_TEE_X  = AHU_EAST_X + 1.25;      // -13.50 — header tee just east of the casing
-  // Reference dims kept for documentation; consumed inside RooftopAHU prop math.
-  void AHU_D; void AHU_TOP_Y;
+     Upsized to W=18 m × D=6.4 m × H=5.0 m to serve the full 500-ton chiller
+     (200,000 CFM design flow, twin 1.2 m DWDI blowers at 760 RPM).
+
+     CHW piping enters through the SOUTH face (−Z side, world Z = AHU_Z − D/2)
+     of the coil section so the risers run directly under the cabinet with no
+     rooftop stubs crossing the access walkway.  The coil section center is at
+     local X ≈ +1.0 m inside the casing (see RooftopAHU section constants).
+
+     Supply duct exits the EAST (+X) face of the discharge plenum, turns 90°
+     south (+Z) and then penetrates through the roof deck (−Y) into the engine
+     room below as a 1.6 m × 1.6 m rectangular supply trunk.  Return duct
+     comes back up on the west (−X) side of the building at the OA mixing box. */
+  const AHU_X     = -22;                       // unit center on roof (world X)
+  const AHU_W     = 18.0;                      // MUST match RooftopAHU W
+  const AHU_D     = 6.4;                       // MUST match RooftopAHU D
+  const AHU_H     = 5.0;                       // MUST match RooftopAHU H
+  const AHU_Z     = (CHW_Z_SUPPLY + CHW_Z_RETURN) / 2;   // midpoint of CHW headers
+  const AHU_BASE_Y = 12.55;                    // top of rooftop curb
+  const AHU_Y     = AHU_BASE_Y + AHU_H / 2;   // 15.05 — casing center Y
+  const AHU_TOP_Y = AHU_BASE_Y + AHU_H;        // 17.55 — top of casing
+  const AHU_EAST_X = AHU_X + AHU_W / 2;        // -13.0 — discharge (+X) face
+  const AHU_WEST_X = AHU_X - AHU_W / 2;        // -31.0 — OA (−X) face
+  const AHU_SOUTH_Z = AHU_Z - AHU_D / 2;       // south (−Z) face — CHW entry side
+  /* Coil section local center at X ≈ +1.0 inside casing
+     → world X = AHU_X + 1.0 = -21.0.
+     Both CHW risers share the same X (coil centre) — they differ only in Y
+     (supply at bottom nozzle, return at top nozzle), matching the Carrier
+     chilled-water coil reference where both connections exit the same header end. */
+  const AHU_COIL_WORLD_X = AHU_X + 1.0;
+  /* Both risers at coil-centre X; the pipe flow markers use these for their
+     animation centre, so keep both pointing to the same world X. */
+  const CHW_RISER_X_SUP = AHU_COIL_WORLD_X;
+  const CHW_RISER_X_RET = AHU_COIL_WORLD_X;
+  /* Duct constants */
+  const DUCT_W    = 1.80;   // supply trunk width (along Z)
+  const DUCT_H    = 1.40;   // supply trunk height (along Y)
+  const DUCT_SKIN = '#8a9098';  // galvanized duct color
+  const DUCT_DARK = '#5a6066';
+  void AHU_WEST_X; void AHU_TOP_Y;
 
   return (
     <group>
@@ -2849,18 +3398,17 @@ function EngineRoom({
               bodyColor="#5a9ec4"
             />
 
-            {/* Inline OS&Y gate valves at AHU side of each header
-                (just chiller-side of the new AHU east-face tee at AHU_TEE_X) */}
+            {/* Inline OS&Y gate valves at AHU coil riser branch points */}
             <GateValve
               valveId="pipe_gate_chw_supply_ahu"
-              position={[AHU_TEE_X + 1.5, HEADER_Y, CHW_Z_SUPPLY]}
+              position={[CHW_RISER_X_SUP - 0.80, HEADER_Y, CHW_Z_SUPPLY]}
               pipeRadius={MAIN_PIPE_RADIUS}
               outerRadius={MAIN_PIPE_INS_RADIUS}
               bodyColor="#1c5aa8"
             />
             <GateValve
               valveId="pipe_gate_chw_return_ahu"
-              position={[AHU_TEE_X + 1.5, HEADER_Y, CHW_Z_RETURN]}
+              position={[CHW_RISER_X_RET - 0.80, HEADER_Y, CHW_Z_RETURN]}
               pipeRadius={MAIN_PIPE_RADIUS}
               outerRadius={MAIN_PIPE_INS_RADIUS}
               bodyColor="#5a9ec4"
@@ -2873,6 +3421,13 @@ function EngineRoom({
           Slab is split so the roof-access shaft matches walkModeWorld LADDER
           (open hatch — no concrete over the opening). */}
       <group position={[0, 12.05, 0]}>
+        {/* Depth-only occluder: invisible plane that writes depth across the
+            entire roof footprint so the machine room is hidden when viewed from
+            the rooftop. Rendered before the slab to establish occlusion. */}
+        <mesh position={[0, -0.01, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={-1}>
+          <planeGeometry args={[74, 74]} />
+          <meshBasicMaterial colorWrite={false} depthWrite={true} />
+        </mesh>
         {(() => {
           const m = 0.22;
           const hx0 = LADDER.xMin - m;
@@ -2982,365 +3537,523 @@ function EngineRoom({
           inside each CHW/CDW pipe group below for accurate per-pipe sizing.) */}
 
       {/* ── COOLING TOWER (rooftop, packaged induced-draft counterflow unit) ── */}
-      <RooftopCoolingTower position={[25, 14.68, CW_TOWER_Z]} />
+      <RooftopCoolingTower position={[25, 14.68, CW_TOWER_Z]} flowing={cdwLoopFlowing} />
 
       {/* ═══════════════════════════════════════════════
           CONDENSER WATER PIPING (CDWS / CDWR)
           ─────────────────────────────────────────────
-          Loop between the chiller condenser (+Z barrel-
-          head nozzles) and the rooftop induced-draft
-          cooling tower. Each circuit:
-            barrel-head nozzle (y≈2.05)
-              → lateral stub  (along +Z)
-              → 90° elbow     (existing barrel-head kit)
-              → vertical riser through roof penetration
-              → 90° elbow on rooftop turning toward +X
-              → horizontal main on roof toward tower
-              → 90° elbow at tower riser
-              → vertical lift to tower side flange
-          Pipe sizes: 24" Sch.40 carbon steel (uninsulated
-          per ASHRAE 90.1 — heat gain on the outdoor
-          condenser loop is negligible). Color identifies
-          service per ASME A13.1 / SMACNA.
+          Counterflow cooling tower — CORRECT hydraulic path:
+
+          CWS (hot water IN → tower TOP):
+            chiller condenser supply nozzle (y≈0.30)
+              → vertical riser up through roof
+              → 90° elbow on rooftop turning +X
+              → rooftop horizontal main
+              → 90° elbow turning +Y (vertical)
+              → vertical riser continues past distribution header
+              → 90° elbow at fan deck turning −X (inward)
+              → short stub into supply inlet stub on TOP of fan deck
+
+          CWR (cold water OUT ← tower BASIN):
+            basin outlet flange on −X face (y≈12.63)
+              → short horizontal stub out through tower wall
+              → 90° elbow turning −Y
+              → vertical drop on tower exterior to roof main level
+              → 90° elbow turning −X (toward chiller)
+              → rooftop horizontal main back toward building
+              → 90° elbow at building turning −Y
+              → vertical riser down through roof penetration
+              → chiller condenser return nozzle (y≈1.30)
+
+          Pipe sizes: 24" Sch.40 carbon steel (uninsulated).
       ═══════════════════════════════════════════════ */}
-      {(
-        [
-          ['sup', CW_X_SUPPLY, CW_Z_SUPPLY, CW_Y_FLG_SUP, '#1d7a3a', '#0e5a22', 'CONDENSER WATER SUPPLY', 'CWS', -1, CW_TOWER_FLG_Y_SUP] as const,
-          ['ret', CW_X_RETURN, CW_Z_RETURN, CW_Y_FLG_RET, '#7ec07a', '#3e7a3a', 'CONDENSER WATER RETURN', 'CWR', +1, CW_TOWER_FLG_Y_RET] as const,
-        ]
-      ).map(([key, xRiser, z, yFlg, pipeC, lblC, fullName, shortName, flow, twrY]) => {
-        const R             = 0.40;                            // long-radius elbow on rooftop main (≈1.8 D)
-        const CDW_BARREL_R  = 0.30;                            // barrel-head elbow centerline (matches barrel-head kit; > MAIN_PIPE_RADIUS)
-        const ROOF_LINE_Y   = 12.05;                           // top of rooftop deck
-        const MAIN_Y        = CW_Y_ROOF_TOP;                   // 12.55 — horizontal main on roof
-        // Engine-room riser TERMINATES exactly at the barrel-head elbow's
-        // riser-side tangent. The barrel-head elbow centre sits at
-        // y = yFlg − R (so the lateral spool, which is R above the
-        // centre, lands on yFlg). The riser-side tangent point is at
-        // the same Y as the elbow centre, with the riser extending in
-        // +Y from there. A 4 cm overlap tucks the riser end inside the
-        // elbow body for a clean welded appearance with no daylight at
-        // the seam.
-        //   sup nozzle (yFlg=0.30): elbow CL @ y=0.0, riser starts at y=−0.04
-        //   ret nozzle (yFlg=1.30): elbow CL @ y=1.0, riser starts at y= 0.96
-        const ENG_BOT_Y     = yFlg - CDW_BARREL_R - 0.04;
-        const ENG_TOP_Y     = MAIN_Y - R;                      // top of engine-room riser (below upper elbow)
-        const ENG_LEN       = ENG_TOP_Y - ENG_BOT_Y;
-        const ENG_CTR_Y     = (ENG_BOT_Y + ENG_TOP_Y) / 2;
-        // Tower-side riser sits 1.0 m back from the flange face so a short
-        // horizontal stub (length R + 0.05) can enter the flange in -X.
-        const TWR_X         = CW_TOWER_FLG_X + 0.95;
-        const ROOF_X_START  = xRiser + R;                      // after upper elbow
-        const ROOF_X_END    = TWR_X - R;                       // before tower elbow
-        const ROOF_LEN      = ROOF_X_END - ROOF_X_START;
-        const ROOF_CTR_X    = (ROOF_X_START + ROOF_X_END) / 2;
-        const TWR_BOT_Y     = MAIN_Y + R;                      // after lower tower elbow
-        const TWR_TOP_Y     = twrY;                            // flange face Y
-        const TWR_LEN       = TWR_TOP_Y - TWR_BOT_Y;
-        const TWR_CTR_Y     = (TWR_BOT_Y + TWR_TOP_Y) / 2;
-        const STUB_X_START  = TWR_X - R;                       // after top tower elbow
-        const STUB_X_END    = CW_TOWER_FLG_X + 0.05;           // just inside flange face
-        const STUB_LEN      = STUB_X_START - STUB_X_END;
-        const STUB_CTR_X    = (STUB_X_START + STUB_X_END) / 2;
+      {(() => {
+        const R            = 0.40;          // long-radius elbow CL radius
+        const CDW_BARREL_R = 0.30;          // barrel-head elbow
+        const ROOF_LINE_Y  = 12.05;         // top of rooftop deck
+        const MAIN_Y       = CW_Y_ROOF_TOP; // 12.55 — horizontal main on roof
+
+        // ── SUPPLY (CWS): chiller → tower top ────────────────────────────
+        // Engine-room riser (supply): barrel nozzle → roof
+        const SUP_ENG_BOT  = CW_Y_FLG_SUP - CDW_BARREL_R - 0.04;   // 0.30 − 0.30 − 0.04 = −0.04
+        const SUP_ENG_TOP  = MAIN_Y - R;
+        const SUP_ENG_LEN  = SUP_ENG_TOP - SUP_ENG_BOT;
+        const SUP_ENG_CTR  = (SUP_ENG_BOT + SUP_ENG_TOP) / 2;
+        // Rooftop horizontal main (supply): building riser → tower X
+        const SUP_ROOF_X0  = CW_X_SUPPLY + R;         // after upper elbow
+        const SUP_ROOF_X1  = CW_TOWER_SUP_X - R;      // before tower riser elbow (X=23.6)
+        const SUP_ROOF_LEN = SUP_ROOF_X1 - SUP_ROOF_X0;
+        const SUP_ROOF_CTR = (SUP_ROOF_X0 + SUP_ROOF_X1) / 2;
+        // Tower-side vertical riser (supply): MAIN_Y up to fan-deck stub
+        const SUP_TWR_BOT  = MAIN_Y + R;              // after elbow at tower base
+        const SUP_TWR_TOP  = CW_TOWER_SUP_Y - R;      // below fan-deck elbow (17.16 − 0.40 = 16.76)
+        const SUP_TWR_LEN  = SUP_TWR_TOP - SUP_TWR_BOT;
+        const SUP_TWR_CTR  = (SUP_TWR_BOT + SUP_TWR_TOP) / 2;
+        // Fan-deck entry stub: horizontal −X into top stub (supply at X=24.0)
+        const SUP_STUB_X0  = CW_TOWER_SUP_X + R;      // from elbow face (24.0 + 0.40)
+        const SUP_STUB_X1  = CW_TOWER_SUP_X - 0.05;   // into fan-deck flange
+        const SUP_STUB_LEN = SUP_STUB_X0 - SUP_STUB_X1;
+        const SUP_STUB_CTR = (SUP_STUB_X0 + SUP_STUB_X1) / 2;
+
+        // ── RETURN (CWR): tower basin → chiller ──────────────────────────
+        // Basin outlet flange at world [23.0, 12.63, CW_Z_RETURN]
+        // Stub out from -X face: horizontal from flange to tower-exterior riser
+        const RET_STUB_X0  = CW_TOWER_FLG_X - 0.05;  // just outside basin wall
+        const RET_STUB_X1  = CW_TOWER_FLG_X - 0.95;  // tower-exterior riser X = 22.05
+        const RET_TWR_X    = RET_STUB_X1 - 0;         // 22.05
+        const RET_STUB_LEN = RET_STUB_X0 - RET_STUB_X1;
+        const RET_STUB_CTR = (RET_STUB_X0 + RET_STUB_X1) / 2;
+        // Tower-exterior vertical drop (return): basin Y → MAIN_Y
+        const RET_TWR_TOP  = CW_TOWER_RET_Y - R;      // 12.63 − 0.40 = 12.23
+        const RET_TWR_BOT  = MAIN_Y - R;              // 12.15
+        const RET_TWR_LEN  = RET_TWR_TOP - RET_TWR_BOT;
+        const RET_TWR_CTR  = (RET_TWR_BOT + RET_TWR_TOP) / 2;
+        // Rooftop horizontal main (return): tower riser → building riser
+        const RET_ROOF_X0  = CW_X_RETURN + R;
+        const RET_ROOF_X1  = RET_TWR_X - R;
+        const RET_ROOF_LEN = RET_ROOF_X1 - RET_ROOF_X0;
+        const RET_ROOF_CTR = (RET_ROOF_X0 + RET_ROOF_X1) / 2;
+        // Engine-room riser (return): barrel nozzle → roof
+        const RET_ENG_BOT  = CW_Y_FLG_RET - CDW_BARREL_R - 0.04;
+        const RET_ENG_TOP  = MAIN_Y - R;
+        const RET_ENG_LEN  = RET_ENG_TOP - RET_ENG_BOT;
+        const RET_ENG_CTR  = (RET_ENG_BOT + RET_ENG_TOP) / 2;
+
+        const supC = '#1d7a3a'; const supLbl = '#0e5a22';
+        const retC = '#7ec07a'; const retLbl = '#3e7a3a';
+
         return (
-          <group key={`cdw-${key}`}>
-            {/* Engine-room vertical riser */}
-            <mesh position={[xRiser, ENG_CTR_Y, z]}>
-              <cylinderGeometry args={[MAIN_PIPE_RADIUS, MAIN_PIPE_RADIUS, ENG_LEN, 16]} />
-              <meshStandardMaterial color={pipeC} roughness={0.55} metalness={0.45} />
-            </mesh>
-            {/* Welded-neck flange just under the roof penetration (service / break point) */}
-            <mesh position={[xRiser, ROOF_LINE_Y - 0.40, z]}>
-              <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.55, MAIN_PIPE_RADIUS * 1.55, 0.06, 16]} />
-              <meshStandardMaterial color="#8a8580" roughness={0.45} metalness={0.85} />
-            </mesh>
-            {/* Roof penetration sleeve (galvanized) */}
-            <mesh position={[xRiser, ROOF_LINE_Y, z]}>
-              <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.45, MAIN_PIPE_RADIUS * 1.55, 0.45, 16]} />
-              <meshStandardMaterial color="#7c8086" roughness={0.55} metalness={0.55} />
-            </mesh>
-            {/* Roof flashing storm-collar */}
-            <mesh position={[xRiser, ROOF_LINE_Y + 0.30, z]}>
-              <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.85, MAIN_PIPE_RADIUS * 1.85, 0.04, 16]} />
-              <meshStandardMaterial color="#5a5854" roughness={0.85} metalness={0.15} />
-            </mesh>
-            {/* 90° elbow at top of engine-room riser (riser +Y → main +X) */}
-            <mesh
-              position={[xRiser + R, MAIN_Y - R, z]}
-              rotation={[0, 0, Math.PI / 2]}
-            >
-              <torusGeometry args={[R, MAIN_PIPE_RADIUS, 12, 20, Math.PI / 2]} />
-              <meshStandardMaterial color={pipeC} roughness={0.55} metalness={0.45} />
-            </mesh>
-            {/* Rooftop horizontal main toward cooling tower */}
-            <mesh position={[ROOF_CTR_X, MAIN_Y, z]} rotation={[0, 0, Math.PI / 2]}>
-              <cylinderGeometry args={[MAIN_PIPE_RADIUS, MAIN_PIPE_RADIUS, ROOF_LEN, 16]} />
-              <meshStandardMaterial color={pipeC} roughness={0.55} metalness={0.45} />
-            </mesh>
-            {/* Roof pipe support sleepers (rubber-pad isolators on the deck) */}
-            {[ROOF_CTR_X - 4, ROOF_CTR_X + 4].map((sx, si) => (
-              <group key={`cdw-sleeper-${key}-${si}`}>
-                <mesh position={[sx, ROOF_LINE_Y + 0.36, z]}>
-                  <boxGeometry args={[0.32, 0.20, 0.50]} />
-                  <meshStandardMaterial color="#3a3835" roughness={0.95} metalness={0.05} />
-                </mesh>
-                <mesh position={[sx, ROOF_LINE_Y + 0.50, z]} rotation={[Math.PI / 2, 0, 0]}>
-                  <torusGeometry args={[0.32, 0.022, 8, 18, Math.PI]} />
-                  <meshStandardMaterial color="#666" roughness={0.55} metalness={0.7} />
-                </mesh>
-              </group>
-            ))}
-            {/* 90° elbow at tower base (main +X → tower riser +Y) */}
-            <mesh
-              position={[TWR_X - R, MAIN_Y, z]}
-              rotation={[0, 0, Math.PI / 2]}
-            >
-              <torusGeometry args={[R, MAIN_PIPE_RADIUS, 12, 20, Math.PI / 2]} />
-              <meshStandardMaterial color={pipeC} roughness={0.55} metalness={0.45} />
-            </mesh>
-            {/* Tower-side vertical lift to side-flange elevation */}
-            <mesh position={[TWR_X, TWR_CTR_Y, z]}>
-              <cylinderGeometry args={[MAIN_PIPE_RADIUS, MAIN_PIPE_RADIUS, TWR_LEN, 16]} />
-              <meshStandardMaterial color={pipeC} roughness={0.55} metalness={0.45} />
-            </mesh>
-            {/* 90° elbow at top of tower riser (tower riser +Y → stub −X) */}
-            <mesh
-              position={[TWR_X, TWR_TOP_Y, z]}
-              rotation={[0, 0, Math.PI]}
-            >
-              <torusGeometry args={[R, MAIN_PIPE_RADIUS, 12, 20, Math.PI / 2]} />
-              <meshStandardMaterial color={pipeC} roughness={0.55} metalness={0.45} />
-            </mesh>
-            {/* Short horizontal stub into the tower side-flange */}
-            <mesh position={[STUB_CTR_X, TWR_TOP_Y, z]} rotation={[0, 0, Math.PI / 2]}>
-              <cylinderGeometry args={[MAIN_PIPE_RADIUS, MAIN_PIPE_RADIUS, STUB_LEN, 16]} />
-              <meshStandardMaterial color={pipeC} roughness={0.55} metalness={0.45} />
-            </mesh>
-            {/* Companion flange at tower connection */}
-            <mesh position={[CW_TOWER_FLG_X + 0.05, TWR_TOP_Y, z]} rotation={[0, 0, Math.PI / 2]}>
-              <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.55, MAIN_PIPE_RADIUS * 1.55, 0.06, 16]} />
-              <meshStandardMaterial color="#8a8580" roughness={0.45} metalness={0.85} />
-            </mesh>
-            {/* OS&Y gate valve in engine-room riser at maintenance height */}
-            <GateValve
-              valveId={key === 'sup' ? 'pipe_gate_cdw_riser_sup' : 'pipe_gate_cdw_riser_ret'}
-              position={[xRiser, 4.50, z]}
-              rotation={[0, 0, Math.PI / 2]}
-              pipeRadius={MAIN_PIPE_RADIUS}
-              bodyColor={pipeC}
-            />
-            {/* OS&Y gate valve on rooftop main near tower (service isolation) */}
-            <GateValve
-              valveId={key === 'sup' ? 'pipe_gate_cdw_roof_sup' : 'pipe_gate_cdw_roof_ret'}
-              position={[ROOF_X_END - 1.6, MAIN_Y, z]}
-              pipeRadius={MAIN_PIPE_RADIUS}
-              bodyColor={pipeC}
-            />
-            {/* ANSI A13.1 wraparound bands on the rooftop main */}
-            <PipeLabel
-              position={[ROOF_CTR_X - 4, MAIN_Y, z]}
-              axisAlong="x"
-              pipeRadius={MAIN_PIPE_RADIUS}
-              bgColor={lblC}
-              text={fullName}
-              flowSign={flow}
-              width={3.0}
-            />
-            <PipeLabel
-              position={[ROOF_CTR_X + 4, MAIN_Y, z]}
-              axisAlong="x"
-              pipeRadius={MAIN_PIPE_RADIUS}
-              bgColor={lblC}
-              text={shortName}
-              flowSign={flow}
-              width={1.6}
-            />
-            {/* Vertical riser ID band (engine-room side, eye level) */}
-            <PipeLabel
-              position={[xRiser, 5.5, z]}
-              axisAlong="y"
-              pipeRadius={MAIN_PIPE_RADIUS}
-              bgColor={lblC}
-              text={shortName}
-              flowSign={flow === -1 ? +1 : -1}
-              width={1.4}
-            />
-          </group>
+          <>
+            {/* ── CWS: ENGINE-ROOM RISER (chiller supply nozzle → roof) ── */}
+            <group key="cdw-sup">
+              <mesh position={[CW_X_SUPPLY, SUP_ENG_CTR, CW_Z_SUPPLY]}>
+                <cylinderGeometry args={[MAIN_PIPE_RADIUS, MAIN_PIPE_RADIUS, SUP_ENG_LEN, 16]} />
+                <meshStandardMaterial color={supC} roughness={0.55} metalness={0.45} />
+              </mesh>
+              <mesh position={[CW_X_SUPPLY, ROOF_LINE_Y - 0.40, CW_Z_SUPPLY]}>
+                <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.55, MAIN_PIPE_RADIUS * 1.55, 0.06, 16]} />
+                <meshStandardMaterial color="#8a8580" roughness={0.45} metalness={0.85} />
+              </mesh>
+              <mesh position={[CW_X_SUPPLY, ROOF_LINE_Y, CW_Z_SUPPLY]}>
+                <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.45, MAIN_PIPE_RADIUS * 1.55, 0.45, 16]} />
+                <meshStandardMaterial color="#7c8086" roughness={0.55} metalness={0.55} />
+              </mesh>
+              <mesh position={[CW_X_SUPPLY, ROOF_LINE_Y + 0.30, CW_Z_SUPPLY]}>
+                <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.85, MAIN_PIPE_RADIUS * 1.85, 0.04, 16]} />
+                <meshStandardMaterial color="#5a5854" roughness={0.85} metalness={0.15} />
+              </mesh>
+              {/* 90° elbow: riser +Y → roof main +X */}
+              <mesh position={[CW_X_SUPPLY + R, MAIN_Y - R, CW_Z_SUPPLY]} rotation={[0, 0, Math.PI / 2]}>
+                <torusGeometry args={[R, MAIN_PIPE_RADIUS, 12, 20, Math.PI / 2]} />
+                <meshStandardMaterial color={supC} roughness={0.55} metalness={0.45} />
+              </mesh>
+              {/* Rooftop horizontal CWS main */}
+              <mesh position={[SUP_ROOF_CTR, MAIN_Y, CW_Z_SUPPLY]} rotation={[0, 0, Math.PI / 2]}>
+                <cylinderGeometry args={[MAIN_PIPE_RADIUS, MAIN_PIPE_RADIUS, SUP_ROOF_LEN, 16]} />
+                <meshStandardMaterial color={supC} roughness={0.55} metalness={0.45} />
+              </mesh>
+              {/* Sleepers */}
+              {[SUP_ROOF_CTR - 4, SUP_ROOF_CTR + 4].map((sx, si) => (
+                <group key={`sup-sleeper-${si}`}>
+                  <mesh position={[sx, ROOF_LINE_Y + 0.36, CW_Z_SUPPLY]}>
+                    <boxGeometry args={[0.32, 0.20, 0.50]} />
+                    <meshStandardMaterial color="#3a3835" roughness={0.95} metalness={0.05} />
+                  </mesh>
+                  <mesh position={[sx, ROOF_LINE_Y + 0.50, CW_Z_SUPPLY]} rotation={[Math.PI / 2, 0, 0]}>
+                    <torusGeometry args={[0.32, 0.022, 8, 18, Math.PI]} />
+                    <meshStandardMaterial color="#666" roughness={0.55} metalness={0.7} />
+                  </mesh>
+                </group>
+              ))}
+              {/* 90° elbow at tower base: roof main +X → tower riser +Y */}
+              <mesh position={[CW_TOWER_SUP_X - R, MAIN_Y, CW_Z_SUPPLY]} rotation={[0, 0, Math.PI / 2]}>
+                <torusGeometry args={[R, MAIN_PIPE_RADIUS, 12, 20, Math.PI / 2]} />
+                <meshStandardMaterial color={supC} roughness={0.55} metalness={0.45} />
+              </mesh>
+              {/* Tower-side vertical riser (supply): roof level → fan deck */}
+              <mesh position={[CW_TOWER_SUP_X, SUP_TWR_CTR, CW_Z_SUPPLY]}>
+                <cylinderGeometry args={[MAIN_PIPE_RADIUS, MAIN_PIPE_RADIUS, SUP_TWR_LEN, 16]} />
+                <meshStandardMaterial color={supC} roughness={0.55} metalness={0.45} />
+              </mesh>
+              {/* 90° elbow at fan deck: riser +Y → fan-deck stub −X (into tower top) */}
+              <mesh position={[CW_TOWER_SUP_X, CW_TOWER_SUP_Y - R, CW_Z_SUPPLY]} rotation={[0, 0, Math.PI]}>
+                <torusGeometry args={[R, MAIN_PIPE_RADIUS, 12, 20, Math.PI / 2]} />
+                <meshStandardMaterial color={supC} roughness={0.55} metalness={0.45} />
+              </mesh>
+              {/* Fan-deck entry stub: horizontal stub into top of tower */}
+              <mesh position={[SUP_STUB_CTR, CW_TOWER_SUP_Y, CW_Z_SUPPLY]} rotation={[0, 0, Math.PI / 2]}>
+                <cylinderGeometry args={[MAIN_PIPE_RADIUS, MAIN_PIPE_RADIUS, SUP_STUB_LEN, 16]} />
+                <meshStandardMaterial color={supC} roughness={0.55} metalness={0.45} />
+              </mesh>
+              {/* Companion flange at fan-deck penetration */}
+              <mesh position={[CW_TOWER_SUP_X - 0.05, CW_TOWER_SUP_Y, CW_Z_SUPPLY]} rotation={[0, 0, Math.PI / 2]}>
+                <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.55, MAIN_PIPE_RADIUS * 1.55, 0.06, 16]} />
+                <meshStandardMaterial color="#8a8580" roughness={0.45} metalness={0.85} />
+              </mesh>
+              {/* OS&Y gate valve — engine-room riser */}
+              <GateValve
+                valveId="pipe_gate_cdw_riser_sup"
+                position={[CW_X_SUPPLY, 4.50, CW_Z_SUPPLY]}
+                rotation={[0, 0, Math.PI / 2]}
+                pipeRadius={MAIN_PIPE_RADIUS}
+                bodyColor={supC}
+              />
+              {/* OS&Y gate valve — rooftop near tower */}
+              <GateValve
+                valveId="pipe_gate_cdw_roof_sup"
+                position={[SUP_ROOF_X1 - 1.6, MAIN_Y, CW_Z_SUPPLY]}
+                pipeRadius={MAIN_PIPE_RADIUS}
+                bodyColor={supC}
+              />
+              <PipeLabel position={[SUP_ROOF_CTR - 4, MAIN_Y, CW_Z_SUPPLY]} axisAlong="x" pipeRadius={MAIN_PIPE_RADIUS} bgColor={supLbl} text="CONDENSER WATER SUPPLY" flowSign={-1} width={3.0} />
+              <PipeLabel position={[SUP_ROOF_CTR + 4, MAIN_Y, CW_Z_SUPPLY]} axisAlong="x" pipeRadius={MAIN_PIPE_RADIUS} bgColor={supLbl} text="CWS" flowSign={-1} width={1.6} />
+              <PipeLabel position={[CW_X_SUPPLY, 5.5, CW_Z_SUPPLY]} axisAlong="y" pipeRadius={MAIN_PIPE_RADIUS} bgColor={supLbl} text="CWS" flowSign={1} width={1.4} />
+            </group>
+
+            {/* ── CWR: TOWER BASIN → ENGINE-ROOM (cold water back to chiller) ── */}
+            <group key="cdw-ret">
+              {/* Basin stub-out from -X face */}
+              <mesh position={[RET_STUB_CTR, CW_TOWER_RET_Y, CW_Z_RETURN]} rotation={[0, 0, Math.PI / 2]}>
+                <cylinderGeometry args={[MAIN_PIPE_RADIUS, MAIN_PIPE_RADIUS, RET_STUB_LEN, 16]} />
+                <meshStandardMaterial color={retC} roughness={0.55} metalness={0.45} />
+              </mesh>
+              {/* Companion flange at basin wall */}
+              <mesh position={[CW_TOWER_FLG_X - 0.05, CW_TOWER_RET_Y, CW_Z_RETURN]} rotation={[0, 0, Math.PI / 2]}>
+                <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.55, MAIN_PIPE_RADIUS * 1.55, 0.06, 16]} />
+                <meshStandardMaterial color="#8a8580" roughness={0.45} metalness={0.85} />
+              </mesh>
+              {/* 90° elbow: stub −X → vertical drop −Y */}
+              <mesh position={[RET_TWR_X, CW_TOWER_RET_Y - R, CW_Z_RETURN]} rotation={[0, 0, -Math.PI / 2]}>
+                <torusGeometry args={[R, MAIN_PIPE_RADIUS, 12, 20, Math.PI / 2]} />
+                <meshStandardMaterial color={retC} roughness={0.55} metalness={0.45} />
+              </mesh>
+              {/* Tower exterior vertical drop (return): basin → roof main */}
+              <mesh position={[RET_TWR_X, RET_TWR_CTR, CW_Z_RETURN]}>
+                <cylinderGeometry args={[MAIN_PIPE_RADIUS, MAIN_PIPE_RADIUS, RET_TWR_LEN, 16]} />
+                <meshStandardMaterial color={retC} roughness={0.55} metalness={0.45} />
+              </mesh>
+              {/* 90° elbow at roof level: riser −Y → roof main −X */}
+              <mesh position={[RET_TWR_X - R, MAIN_Y, CW_Z_RETURN]} rotation={[0, 0, -Math.PI / 2]}>
+                <torusGeometry args={[R, MAIN_PIPE_RADIUS, 12, 20, Math.PI / 2]} />
+                <meshStandardMaterial color={retC} roughness={0.55} metalness={0.45} />
+              </mesh>
+              {/* Rooftop horizontal CWR main: tower → building */}
+              <mesh position={[RET_ROOF_CTR, MAIN_Y, CW_Z_RETURN]} rotation={[0, 0, Math.PI / 2]}>
+                <cylinderGeometry args={[MAIN_PIPE_RADIUS, MAIN_PIPE_RADIUS, RET_ROOF_LEN, 16]} />
+                <meshStandardMaterial color={retC} roughness={0.55} metalness={0.45} />
+              </mesh>
+              {/* Sleepers */}
+              {[RET_ROOF_CTR - 4, RET_ROOF_CTR + 4].map((sx, si) => (
+                <group key={`ret-sleeper-${si}`}>
+                  <mesh position={[sx, ROOF_LINE_Y + 0.36, CW_Z_RETURN]}>
+                    <boxGeometry args={[0.32, 0.20, 0.50]} />
+                    <meshStandardMaterial color="#3a3835" roughness={0.95} metalness={0.05} />
+                  </mesh>
+                  <mesh position={[sx, ROOF_LINE_Y + 0.50, CW_Z_RETURN]} rotation={[Math.PI / 2, 0, 0]}>
+                    <torusGeometry args={[0.32, 0.022, 8, 18, Math.PI]} />
+                    <meshStandardMaterial color="#666" roughness={0.55} metalness={0.7} />
+                  </mesh>
+                </group>
+              ))}
+              {/* 90° elbow at building riser: roof main −X → riser −Y */}
+              <mesh position={[CW_X_RETURN + R, MAIN_Y - R, CW_Z_RETURN]} rotation={[0, 0, Math.PI / 2]}>
+                <torusGeometry args={[R, MAIN_PIPE_RADIUS, 12, 20, Math.PI / 2]} />
+                <meshStandardMaterial color={retC} roughness={0.55} metalness={0.45} />
+              </mesh>
+              {/* Engine-room riser (return): roof → chiller return nozzle */}
+              <mesh position={[CW_X_RETURN, RET_ENG_CTR, CW_Z_RETURN]}>
+                <cylinderGeometry args={[MAIN_PIPE_RADIUS, MAIN_PIPE_RADIUS, RET_ENG_LEN, 16]} />
+                <meshStandardMaterial color={retC} roughness={0.55} metalness={0.45} />
+              </mesh>
+              <mesh position={[CW_X_RETURN, ROOF_LINE_Y - 0.40, CW_Z_RETURN]}>
+                <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.55, MAIN_PIPE_RADIUS * 1.55, 0.06, 16]} />
+                <meshStandardMaterial color="#8a8580" roughness={0.45} metalness={0.85} />
+              </mesh>
+              <mesh position={[CW_X_RETURN, ROOF_LINE_Y, CW_Z_RETURN]}>
+                <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.45, MAIN_PIPE_RADIUS * 1.55, 0.45, 16]} />
+                <meshStandardMaterial color="#7c8086" roughness={0.55} metalness={0.55} />
+              </mesh>
+              <mesh position={[CW_X_RETURN, ROOF_LINE_Y + 0.30, CW_Z_RETURN]}>
+                <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.85, MAIN_PIPE_RADIUS * 1.85, 0.04, 16]} />
+                <meshStandardMaterial color="#5a5854" roughness={0.85} metalness={0.15} />
+              </mesh>
+              {/* OS&Y gate valve — engine-room riser */}
+              <GateValve
+                valveId="pipe_gate_cdw_riser_ret"
+                position={[CW_X_RETURN, 4.50, CW_Z_RETURN]}
+                rotation={[0, 0, Math.PI / 2]}
+                pipeRadius={MAIN_PIPE_RADIUS}
+                bodyColor={retC}
+              />
+              {/* OS&Y gate valve — rooftop near tower */}
+              <GateValve
+                valveId="pipe_gate_cdw_roof_ret"
+                position={[RET_ROOF_X0 + 1.6, MAIN_Y, CW_Z_RETURN]}
+                pipeRadius={MAIN_PIPE_RADIUS}
+                bodyColor={retC}
+              />
+              <PipeLabel position={[RET_ROOF_CTR - 4, MAIN_Y, CW_Z_RETURN]} axisAlong="x" pipeRadius={MAIN_PIPE_RADIUS} bgColor={retLbl} text="CONDENSER WATER RETURN" flowSign={1} width={3.0} />
+              <PipeLabel position={[RET_ROOF_CTR + 4, MAIN_Y, CW_Z_RETURN]} axisAlong="x" pipeRadius={MAIN_PIPE_RADIUS} bgColor={retLbl} text="CWR" flowSign={1} width={1.6} />
+              <PipeLabel position={[CW_X_RETURN, 5.5, CW_Z_RETURN]} axisAlong="y" pipeRadius={MAIN_PIPE_RADIUS} bgColor={retLbl} text="CWR" flowSign={-1} width={1.4} />
+            </group>
+          </>
         );
-      })}
+      })()}
 
       {/* ═══════════════════════════════════════════════
           ROOFTOP AIR HANDLING UNIT (AHU-1)
           Conditions engine-room air via CHW coil.
 
-          CHW SUPPLY / RETURN connection (mirrors the
-          cooling-tower CDW pattern):
+          CHW SUPPLY / RETURN connection:
             in-room low-level header
-              → 90° tee at AHU_TEE_X (just east of casing)
-              → vertical riser through roof penetration
-              → 90° elbow on rooftop turning toward −X
-              → short rooftop stub into AHU east end-cap
+              → 90° tee at coil-riser world-X
+              → vertical riser through roof deck
+              → 90° elbow on rooftop turning south (−Z)
+              → short rooftop stub into AHU south (−Z) face
               → companion flange at casing penetration
-              → coil-section header inside the cabinet
+              → internal coil-header stub (+Z into section)
 
-          Supply enters the bottom of the coil headers,
-          return leaves the top — counter-flow against the
-          air stream. This puts the two pipes at clearly
-          different heights so service identification is
-          obvious from the rooftop.
+          Supply enters the bottom of the coil headers (lower Y),
+          return leaves the top (higher Y) — counter-flow against
+          the air stream for maximum heat transfer effectiveness.
       ═══════════════════════════════════════════════ */}
 
-      {/* AHU casing on rooftop curb */}
-      <RooftopAHU position={[AHU_X, AHU_Y, AHU_Z]} />
+      {/* AHU casing on rooftop curb.
+          `cutaway` hides the exterior shell — main casing, panel seams,
+          access doors, door frames, fan grilles, end caps, OA hood, control
+          enclosure, and equipment labels — so the trainee can see straight
+          into the cabinet at the MERV filter bank, CHW copper coil, twin
+          housed centrifugal blowers, OA damper, and DS-AHU service
+          disconnect. The rooftop curb, walkway, top-mounted relief / exhaust
+          fans, VFDs, and overhead "AHU-1 — CUTAWAY" label remain so the
+          unit still reads as an AHU at a distance. */}
+      {/* ─── ROOFTOP AHU — imported GLB model (AHU-1) ─── */}
+      <AhuGlbPreview
+        url="/models/ahu/ahu.glb"
+        position={[AHU_X, ROOF_WALK_Y, AHU_Z]}
+        rotationY={0}
+        targetWidth={AHU_W}
+        label="AHU-1"
+      />
 
-      {(
-        [
-          // [key, z (header line), entry-Y on AHU east face, pipeC, insC, lblC, label]
-          ['sup', CHW_Z_SUPPLY, AHU_BASE_Y + 0.85, '#1c5aa8', '#143f7a', '#0d3f7a', 'CHWS'] as const,
-          /* CHWR: light blue return per pid color_coding_standards_2026 */
-          ['ret', CHW_Z_RETURN, AHU_BASE_Y + 3.05, '#7eb8d8', '#5a9ec4', '#4a8ab8', 'CHWR'] as const,
-        ]
-      ).map(([key, z, entryY, pipeC, insC, lblC, txt]) => {
-        const R             = 0.45;                          // long-radius elbow centerline
-        const HEADER_Y      = 1.10;                          // engine-room horizontal main
-        const RISER_BOT_Y   = HEADER_Y + 0.30;               // above tee body
-        const RISER_TOP_Y   = entryY - R;                    // below upper elbow
-        const RISER_LEN     = RISER_TOP_Y - RISER_BOT_Y;
-        const RISER_CTR_Y   = (RISER_BOT_Y + RISER_TOP_Y) / 2;
-        // Rooftop stub: from elbow exit (x = AHU_TEE_X − R) to AHU east face
-        const STUB_X_START  = AHU_TEE_X - R;
-        const STUB_X_END    = AHU_EAST_X + 0.04;             // just inside skin panel
-        const STUB_LEN      = STUB_X_START - STUB_X_END;
-        const STUB_CTR_X    = (STUB_X_START + STUB_X_END) / 2;
-        // Internal coil-header stub poking through the east end-cap
-        const HDR_X_END     = AHU_EAST_X - 1.10;             // ~1 m into coil section
-        const HDR_LEN       = AHU_EAST_X - HDR_X_END;
-        const HDR_CTR_X     = (AHU_EAST_X + HDR_X_END) / 2;
+      {/* ═══════════════════════════════════════════════════════════════
+          CHW SUPPLY & RETURN — ENGINE ROOM HEADERS TO AHU GLB MODEL
+
+          The GLB AHU sits at (AHU_X, ROOF_WALK_Y, AHU_Z), auto-scaled to
+          AHU_W wide. Its south casing face is at Z = AHU_Z − AHU_D/2.
+          Coil stub-outs exit through that south face at mid-unit X, at two
+          heights: CHWS (supply, blue) at upper position, CHWR (return) below.
+
+          Each pipe path:
+            ① Casing stub: exits south face (−Z) horizontally ~0.6 m
+            ② Companion flange at stub end
+            ③ 90° long-radius elbow: turns −Z → −Y (straight down)
+            ④ Vertical riser drops through rooftop curb + roof deck
+            ⑤ Roof penetration flashing boot
+            ⑥ Continues dropping to engine-room ceiling height
+            ⑦ 90° elbow: −Y → ±Z toward respective CHW main
+            ⑧ Horizontal run + tee into engine-room low-level CHW header
+      ═══════════════════════════════════════════════════════════════ */}
+      {(() => {
+        const R    = 0.40;                 // long-radius elbow CL radius
+        const PR   = MAIN_PIPE_RADIUS;
+        const PINS = MAIN_PIPE_INS_RADIUS;
+
+        /* AHU south casing face world Z */
+        const SOUTH_FACE_Z = AHU_Z - AHU_D / 2;
+
+        /* Stub-out X: centred on AHU, nudged ±0.30 m so pipes don't overlap */
+        const CHWS_X = AHU_X + 0.30;    // supply — slight +X offset
+        const CHWR_X = AHU_X - 0.30;    // return  — slight −X offset
+
+        /* Stub-out Y heights on the south casing face.
+           AHU GLB base = ROOF_WALK_Y, height ≈ AHU_H.
+           Place CHWS at ~60 % of unit height, CHWR at ~35 %. */
+        const CHWS_Y = ROOF_WALK_Y + AHU_H * 0.60;   // supply — upper stub
+        const CHWR_Y = ROOF_WALK_Y + AHU_H * 0.35;   // return  — lower stub
+
+        /* Stub extends 0.60 m south from the casing face before the elbow */
+        const STUB_LEN  = 0.60;
+        const STUB_TIP_Z = SOUTH_FACE_Z - STUB_LEN;   // where elbow entry starts
+
+        /* Riser drops at Z = STUB_TIP_Z − R (south of elbow centre) */
+        const RISER_Z = STUB_TIP_Z - R;
+
+        /* Engine-room low-level CHW main elevation */
+        const HEADER_Y = 1.10;
+
         return (
-          <group key={`chw-ahu-riser-${key}`}>
-            {/* ── Tee body on the in-room horizontal header ── */}
-            <mesh position={[AHU_TEE_X, HEADER_Y, z]}>
-              <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.40, MAIN_PIPE_RADIUS * 1.40, 0.50, 16]} />
-              <meshStandardMaterial color={pipeC} roughness={0.5} metalness={0.5} />
-            </mesh>
-            {/* Companion flange pair at the tee */}
-            {[-MAIN_PIPE_RADIUS * 1.30, +MAIN_PIPE_RADIUS * 1.30].map((dx, fi) => (
-              <mesh
-                key={`chw-ahu-tee-flg-${key}-${fi}`}
-                position={[AHU_TEE_X + dx, HEADER_Y, z]}
-                rotation={[0, 0, Math.PI / 2]}
-              >
-                <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.55, MAIN_PIPE_RADIUS * 1.55, 0.06, 16]} />
-                <meshStandardMaterial color="#8a8580" roughness={0.45} metalness={0.85} />
-              </mesh>
-            ))}
+          <>
+            {([
+              {
+                key:      'sup',
+                pipeX:    CHWS_X,
+                stubY:    CHWS_Y,
+                hdrZ:     CHW_Z_SUPPLY,
+                pipeC:    '#1c5aa8',
+                insC:     '#143f7a',
+                lblC:     '#0d3f7a',
+                txt:      'CHWS',
+                flowSign: -1 as const,
+              },
+              {
+                key:      'ret',
+                pipeX:    CHWR_X,
+                stubY:    CHWR_Y,
+                hdrZ:     CHW_Z_RETURN,
+                pipeC:    '#7eb8d8',
+                insC:     '#5a9ec4',
+                lblC:     '#4a8ab8',
+                txt:      'CHWR',
+                flowSign: +1 as const,
+              },
+            ] as const).map(({ key, pipeX, stubY, hdrZ, pipeC, insC, lblC, txt, flowSign }) => {
 
-            {/* ── Vertical engine-room riser ── */}
-            <mesh position={[AHU_TEE_X, RISER_CTR_Y, z]}>
-              <cylinderGeometry args={[MAIN_PIPE_RADIUS, MAIN_PIPE_RADIUS, RISER_LEN, 16]} />
-              <meshStandardMaterial color={pipeC} roughness={0.6} metalness={0.4} />
-            </mesh>
-            {/* Insulation jacket — full length minus curb flashing zone */}
-            <mesh position={[AHU_TEE_X, RISER_CTR_Y - 0.05, z]}>
-              <cylinderGeometry args={[MAIN_PIPE_INS_RADIUS, MAIN_PIPE_INS_RADIUS, RISER_LEN - 0.55, 14]} />
-              <meshStandardMaterial color={insC} roughness={0.9} metalness={0.0} transparent opacity={0.92} />
-            </mesh>
-            {/* Automatic air vent — high point of vertical CHW riser (pid air_management) */}
-            <AirVent
-              position={[AHU_TEE_X, RISER_TOP_Y - 0.25, z]}
-              rotation={[0, 0, Math.PI / 2]}
-              pipeRadius={MAIN_PIPE_RADIUS}
-            />
-            {/* Roof penetration sleeve (galvanized boot at rooftop deck) */}
-            <mesh position={[AHU_TEE_X, 12.10, z]}>
-              <cylinderGeometry args={[MAIN_PIPE_INS_RADIUS + 0.04, MAIN_PIPE_INS_RADIUS + 0.10, 0.36, 16]} />
-              <meshStandardMaterial color="#7c8086" roughness={0.55} metalness={0.55} />
-            </mesh>
+              /* ① Casing stub — runs from south face outward in −Z */
+              const STUB_CTR_Z = SOUTH_FACE_Z - STUB_LEN / 2;
 
-            {/* ── Long-radius elbow at top of riser (turns +Y → −X) ──
-                 Torus center placed so its default 0→π/2 arc spans
-                 from the riser top (R right of center) to the stub
-                 right-end (R above center). */}
-            <mesh
-              position={[AHU_TEE_X - R, RISER_TOP_Y, z]}
-            >
-              <torusGeometry args={[R, MAIN_PIPE_RADIUS, 12, 20, Math.PI / 2]} />
-              <meshStandardMaterial color={pipeC} roughness={0.55} metalness={0.45} />
-            </mesh>
+              /* ② Companion flange at stub tip */
+              const FLG_Z = STUB_TIP_Z;
 
-            {/* ── Rooftop stub into AHU east end-cap ── */}
-            <mesh position={[STUB_CTR_X, entryY, z]} rotation={[0, 0, Math.PI / 2]}>
-              <cylinderGeometry args={[MAIN_PIPE_RADIUS, MAIN_PIPE_RADIUS, STUB_LEN, 16]} />
-              <meshStandardMaterial color={pipeC} roughness={0.6} metalness={0.4} />
-            </mesh>
-            {/* Insulation jacket on the rooftop stub */}
-            <mesh position={[STUB_CTR_X, entryY, z]} rotation={[0, 0, Math.PI / 2]}>
-              <cylinderGeometry args={[MAIN_PIPE_INS_RADIUS, MAIN_PIPE_INS_RADIUS, Math.max(STUB_LEN - 0.20, 0.05), 14]} />
-              <meshStandardMaterial color={insC} roughness={0.9} metalness={0.0} transparent opacity={0.92} />
-            </mesh>
+              /* ③ Elbow centre: R south of flange, same Y as stub */
+              const ELB_Z = FLG_Z - R;
 
-            {/* Pipe support / saddle on the rooftop deck under the stub */}
-            <mesh position={[STUB_CTR_X, 12.40, z]}>
-              <boxGeometry args={[0.45, 0.30, 0.50]} />
-              <meshStandardMaterial color="#5a5854" roughness={0.85} metalness={0.1} />
-            </mesh>
+              /* ④ Vertical drop: from elbow bottom to just above base elbow */
+              const DROP_TOP_Y = stubY - R;
+              const DROP_BOT_Y = HEADER_Y + R;
+              const DROP_LEN   = Math.max(DROP_TOP_Y - DROP_BOT_Y, 0.05);
+              const DROP_CTR_Y = (DROP_TOP_Y + DROP_BOT_Y) / 2;
 
-            {/* ── Companion flange pair at the AHU casing penetration ── */}
-            <mesh
-              position={[AHU_EAST_X + 0.07, entryY, z]}
-              rotation={[0, 0, Math.PI / 2]}
-            >
-              <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.55, MAIN_PIPE_RADIUS * 1.55, 0.06, 16]} />
-              <meshStandardMaterial color="#8a8580" roughness={0.45} metalness={0.85} />
-            </mesh>
-            {/* Boss / penetration ring on the cabinet skin */}
-            <mesh
-              position={[AHU_EAST_X + 0.005, entryY, z]}
-              rotation={[0, 0, Math.PI / 2]}
-            >
-              <cylinderGeometry args={[MAIN_PIPE_RADIUS * 1.70, MAIN_PIPE_RADIUS * 1.70, 0.04, 18]} />
-              <meshStandardMaterial color="#7c8086" roughness={0.5} metalness={0.6} />
-            </mesh>
-            {/* Bolt circle on the companion flange */}
-            {Array.from({ length: 8 }).map((_, bi) => {
-              const a = (bi / 8) * Math.PI * 2;
-              const r = 0.36;
+              /* ⑦ Base elbow direction toward CHW main */
+              const dir        = hdrZ > RISER_Z ? 1 : -1;
+              const BASE_ELB_Z = RISER_Z + dir * R;
+
+              /* ⑧ Horizontal run to tee */
+              const H_LEN   = Math.max(Math.abs(RISER_Z - hdrZ) - R, 0.05);
+              const H_CTR_Z = (RISER_Z + hdrZ) / 2;
+
               return (
-                <mesh
-                  key={`chw-ahu-bolt-${key}-${bi}`}
-                  position={[AHU_EAST_X + 0.10, entryY + Math.sin(a) * r, z + Math.cos(a) * r]}
-                  rotation={[0, 0, Math.PI / 2]}
-                >
-                  <cylinderGeometry args={[0.020, 0.020, 0.05, 6]} />
-                  <meshStandardMaterial color="#3b3a38" roughness={0.5} metalness={0.85} />
-                </mesh>
+                <group key={`chw-ahu-${key}`}>
+
+                  {/* ① Casing stub (exits south face in −Z) */}
+                  <mesh position={[pipeX, stubY, STUB_CTR_Z]} rotation={[Math.PI / 2, 0, 0]}>
+                    <cylinderGeometry args={[PR, PR, STUB_LEN, 16]} />
+                    <meshStandardMaterial color={pipeC} roughness={0.5} metalness={0.5} />
+                  </mesh>
+                  {/* Insulation on stub */}
+                  <mesh position={[pipeX, stubY, STUB_CTR_Z]} rotation={[Math.PI / 2, 0, 0]}>
+                    <cylinderGeometry args={[PINS, PINS, STUB_LEN - 0.10, 14]} />
+                    <meshStandardMaterial color={insC} roughness={0.9} metalness={0.0} transparent opacity={0.92} />
+                  </mesh>
+                  {/* Casing wall boss (galvanized sleeve where pipe exits AHU) */}
+                  <mesh position={[pipeX, stubY, SOUTH_FACE_Z - 0.06]} rotation={[Math.PI / 2, 0, 0]}>
+                    <cylinderGeometry args={[PINS + 0.07, PINS + 0.07, 0.12, 14]} />
+                    <meshStandardMaterial color="#6a7078" roughness={0.6} metalness={0.6} />
+                  </mesh>
+
+                  {/* ② Companion flange at stub tip */}
+                  <mesh position={[pipeX, stubY, FLG_Z]} rotation={[Math.PI / 2, 0, 0]}>
+                    <cylinderGeometry args={[PR * 1.90, PR * 1.90, 0.055, 16]} />
+                    <meshStandardMaterial color="#8a8580" roughness={0.45} metalness={0.85} />
+                  </mesh>
+                  {Array.from({ length: 6 }).map((_, bi) => {
+                    const a = (bi / 6) * Math.PI * 2;
+                    const bR = PR * 1.65;
+                    return (
+                      <mesh key={`flg-bolt-${key}-${bi}`}
+                        position={[pipeX + Math.cos(a) * bR, stubY + Math.sin(a) * bR, FLG_Z - 0.04]}
+                        rotation={[Math.PI / 2, 0, 0]}
+                      >
+                        <cylinderGeometry args={[0.016, 0.016, 0.06, 6]} />
+                        <meshStandardMaterial color="#3b3a38" roughness={0.5} metalness={0.85} />
+                      </mesh>
+                    );
+                  })}
+
+                  {/* ③ 90° long-radius elbow: −Z → −Y (stub exits −Z, turns down −Y)
+                       Torus centre at (pipeX, stubY, ELB_Z).
+                       Rotation [−π/2, 0, π] sweeps the default XZ arc from the
+                       +Z tangent point (meets stub tip) down to the −Y exit.   */}
+                  <mesh position={[pipeX, stubY, ELB_Z]} rotation={[-Math.PI / 2, 0, Math.PI]}>
+                    <torusGeometry args={[R, PR, 12, 24, Math.PI / 2]} />
+                    <meshStandardMaterial color={pipeC} roughness={0.5} metalness={0.45} />
+                  </mesh>
+
+                  {/* ④ Vertical drop through curb + roof deck */}
+                  <mesh position={[pipeX, DROP_CTR_Y, RISER_Z]}>
+                    <cylinderGeometry args={[PR, PR, DROP_LEN, 16]} />
+                    <meshStandardMaterial color={pipeC} roughness={0.55} metalness={0.45} />
+                  </mesh>
+                  {/* Insulation on drop */}
+                  <mesh position={[pipeX, DROP_CTR_Y, RISER_Z]}>
+                    <cylinderGeometry args={[PINS, PINS, Math.max(DROP_LEN - 0.50, 0.10), 14]} />
+                    <meshStandardMaterial color={insC} roughness={0.9} metalness={0.0} transparent opacity={0.92} />
+                  </mesh>
+
+                  {/* ⑤ Roof penetration flashing boot */}
+                  <mesh position={[pipeX, ROOF_WALK_Y - 0.12, RISER_Z]}>
+                    <cylinderGeometry args={[PINS + 0.06, PINS + 0.14, 0.36, 16]} />
+                    <meshStandardMaterial color="#7c8086" roughness={0.55} metalness={0.55} />
+                  </mesh>
+
+                  {/* ⑦ Base elbow: −Y → ±Z toward engine-room CHW main */}
+                  <mesh
+                    position={[pipeX, DROP_BOT_Y, BASE_ELB_Z]}
+                    rotation={[Math.PI / 2, dir > 0 ? 0 : Math.PI, 0]}
+                  >
+                    <torusGeometry args={[R, PR, 12, 24, Math.PI / 2]} />
+                    <meshStandardMaterial color={pipeC} roughness={0.5} metalness={0.45} />
+                  </mesh>
+
+                  {/* ⑧ Horizontal run to CHW main */}
+                  <mesh position={[pipeX, HEADER_Y, H_CTR_Z]} rotation={[Math.PI / 2, 0, 0]}>
+                    <cylinderGeometry args={[PR, PR, H_LEN, 16]} />
+                    <meshStandardMaterial color={pipeC} roughness={0.55} metalness={0.45} />
+                  </mesh>
+                  <mesh position={[pipeX, HEADER_Y, H_CTR_Z]} rotation={[Math.PI / 2, 0, 0]}>
+                    <cylinderGeometry args={[PINS, PINS, Math.max(H_LEN - 0.20, 0.05), 14]} />
+                    <meshStandardMaterial color={insC} roughness={0.9} metalness={0.0} transparent opacity={0.92} />
+                  </mesh>
+
+                  {/* Tee fitting on engine-room CHW main */}
+                  <mesh position={[pipeX, HEADER_Y, hdrZ]}>
+                    <cylinderGeometry args={[PR * 1.35, PR * 1.35, 0.48, 16]} />
+                    <meshStandardMaterial color={pipeC} roughness={0.5} metalness={0.5} />
+                  </mesh>
+                  {[-PR * 1.25, +PR * 1.25].map((dz, fi) => (
+                    <mesh
+                      key={`tee-flg-${key}-${fi}`}
+                      position={[pipeX, HEADER_Y, hdrZ + dz]}
+                      rotation={[Math.PI / 2, 0, 0]}
+                    >
+                      <cylinderGeometry args={[PR * 1.50, PR * 1.50, 0.06, 16]} />
+                      <meshStandardMaterial color="#8a8580" roughness={0.45} metalness={0.85} />
+                    </mesh>
+                  ))}
+
+                  {/* Air vent below roof penetration */}
+                  <AirVent
+                    position={[pipeX, ROOF_WALK_Y - 0.60, RISER_Z]}
+                    rotation={[0, 0, Math.PI / 2]}
+                    pipeRadius={PR}
+                  />
+
+                  {/* Service ID label on vertical riser */}
+                  <PipeLabel
+                    position={[pipeX, DROP_CTR_Y, RISER_Z]}
+                    axisAlong="y"
+                    pipeRadius={PR + 0.05}
+                    bgColor={lblC}
+                    text={txt}
+                    flowSign={flowSign}
+                    width={1.0}
+                  />
+                </group>
               );
             })}
-
-            {/* ── Internal coil-header stub (visible inside on east end-cap) ── */}
-            <mesh position={[HDR_CTR_X, entryY, z]} rotation={[0, 0, Math.PI / 2]}>
-              <cylinderGeometry args={[MAIN_PIPE_RADIUS, MAIN_PIPE_RADIUS, HDR_LEN, 16]} />
-              <meshStandardMaterial color={pipeC} roughness={0.55} metalness={0.45} />
-            </mesh>
-            {/* Header end cap (welded dished cap) */}
-            <mesh position={[HDR_X_END - 0.04, entryY, z]} rotation={[0, 0, Math.PI / 2]}>
-              <cylinderGeometry args={[0.30, 0.26, 0.10, 16]} />
-              <meshStandardMaterial color={pipeC} roughness={0.55} metalness={0.45} />
-            </mesh>
-
-            {/* ── ANSI A13.1 service-ID band on the rooftop stub ── */}
-            <PipeLabel
-              position={[STUB_CTR_X, entryY, z]}
-              axisAlong="x"
-              pipeRadius={0.40}
-              bgColor={lblC}
-              text={txt}
-              flowSign={key === 'sup' ? -1 : +1}
-              width={1.0}
-            />
-          </group>
+          </>
         );
-      })}
+      })()}
 
       {/* ── PIPE IDENTIFICATION BANDS on the low-level CHW headers ──
            ANSI A13.1 wraparound vinyl bands at maintenance-eye level
@@ -3374,6 +4087,452 @@ function EngineRoom({
         </group>
       ))}
 
+      {/* ═══════════════════════════════════════════════════════════════════
+          AHU-1 DUCT SYSTEM
+          Supply air flows: AHU discharge plenum → supply trunk (roof)
+            → roof penetration → engine-room ceiling trunk (west half)
+            → branch ducts at each structural bay → supply diffusers
+          Return air flows: engine-room ceiling return grilles
+            → return trunk (east of building) → roof penetration
+            → AHU mixing-box return connection
+
+          Duct materials: 22-gauge galvanized steel, Pittsburgh lock seam.
+          Supply trunk: 1.80 m wide × 1.40 m tall.
+          Return trunk: 1.60 m wide × 1.20 m tall.
+          Branches:     0.90 m wide × 0.50 m tall.
+          All sizes correspond to ~200,000 CFM at 1,200 FPM face velocity.
+      ═══════════════════════════════════════════════════════════════════ */}
+      {(() => {
+        /* ── Supply duct geometry ── */
+        const SUP_Y_CEIL    = 11.0;           // bottom of supply trunk (hung from ceiling beams)
+        const RET_Y_CEIL    = 10.6;           // bottom of return trunk
+        const TRUNK_Z_CTR   = AHU_Z + 1.0;   // supply trunk Z (south of AHU)
+        const RET_TRUNK_Z   = AHU_Z - 6.0;   // return trunk Z (north, toward chiller)
+
+        /* Roof penetration world X — aligned with AHU discharge plenum center.
+           Discharge plenum local center X ≈ (DISC_X_MIN+DISC_X_MAX)/2 = +8.2
+           → world X = AHU_X + 8.2 = -13.8 */
+        const PEN_X   = AHU_X + 8.2;         // supply duct roof penetration X
+        const PEN_Z   = TRUNK_Z_CTR;         // same Z as supply trunk
+        const PEN_Y_TOP  = AHU_BASE_Y - 0.10; // just below curb bottom
+        const PEN_Y_BOT  = SUP_Y_CEIL;        // trunk top = engine-room ceiling level
+
+        /* Engine-room supply trunk runs from penetration westward to far wall */
+        const TRUNK_X_END  = -30;             // west end of engine room
+        const TRUNK_LEN    = PEN_X - TRUNK_X_END;
+        const TRUNK_X_CTR  = (PEN_X + TRUNK_X_END) / 2;
+
+        /* Return trunk world X: west side of building */
+        const RET_X_EAST   = -5;              // east end of return trunk (where building ends)
+        const RET_X_WEST   = -30;             // west end
+        const RET_TRUNK_LEN = RET_X_EAST - RET_X_WEST;
+        const RET_TRUNK_CTR = (RET_X_EAST + RET_X_WEST) / 2;
+
+        /* Branch ducts drop from the supply trunk at structural bay centers */
+        const BRANCH_DROPS: number[] = [-22, -16, -10, -4];
+        const BRANCH_LEN = 5.0;               // branch runs in Z away from trunk
+        const BRANCH_Y_CTR = SUP_Y_CEIL + DUCT_H / 2 - 0.25 - 0.30;
+
+        return (
+          <group name="ahu:duct-system">
+            {/* ═══════════════ SUPPLY SIDE ═══════════════ */}
+
+            {/* Roof-level horizontal connector from AHU east discharge face
+                to the vertical roof penetration — runs along the roof deck. */}
+            <mesh
+              position={[(AHU_EAST_X + PEN_X) / 2, AHU_BASE_Y + DUCT_H / 2, PEN_Z]}
+              castShadow
+            >
+              <boxGeometry args={[Math.abs(PEN_X - AHU_EAST_X) + 0.02, DUCT_H, DUCT_W]} />
+              <meshStandardMaterial color={DUCT_SKIN} roughness={0.55} metalness={0.55} />
+            </mesh>
+            {/* Seam strips on top and sides of rooftop connector */}
+            {[0, 1, 2, 3].map((si) => {
+              const isX = si < 2;
+              const offset = isX ? (si === 0 ? DUCT_W / 2 : -DUCT_W / 2) : (si === 2 ? DUCT_H : 0);
+              const rotZ   = isX ? 0 : Math.PI / 2;
+              const len    = Math.abs(PEN_X - AHU_EAST_X);
+              return (
+                <mesh
+                  key={`sup-roof-seam-${si}`}
+                  position={[(AHU_EAST_X + PEN_X) / 2, AHU_BASE_Y + (isX ? DUCT_H / 2 : offset / 2), PEN_Z + (isX ? offset : 0)]}
+                  rotation={[0, 0, rotZ]}
+                >
+                  <boxGeometry args={[len, 0.04, 0.04]} />
+                  <meshStandardMaterial color={DUCT_DARK} roughness={0.6} metalness={0.6} />
+                </mesh>
+              );
+            })}
+
+            {/* Roof-to-engine-room supply elbow / transition — vertical drop */}
+            <mesh position={[PEN_X, (PEN_Y_TOP + PEN_Y_BOT) / 2, PEN_Z]} castShadow>
+              <boxGeometry args={[DUCT_W, PEN_Y_TOP - PEN_Y_BOT + 0.20, DUCT_W]} />
+              <meshStandardMaterial color={DUCT_SKIN} roughness={0.55} metalness={0.55} />
+            </mesh>
+            {/* Roof penetration curb flashing */}
+            <mesh position={[PEN_X, AHU_BASE_Y - 0.12, PEN_Z]}>
+              <boxGeometry args={[DUCT_W + 0.22, 0.18, DUCT_W + 0.22]} />
+              <meshStandardMaterial color="#7a8088" roughness={0.65} metalness={0.55} />
+            </mesh>
+
+            {/* Engine-room supply trunk — horizontal, hung at ceiling level
+                running west from the supply penetration. */}
+            <mesh position={[TRUNK_X_CTR, SUP_Y_CEIL + DUCT_H / 2, TRUNK_Z_CTR]} castShadow receiveShadow>
+              <boxGeometry args={[TRUNK_LEN, DUCT_H, DUCT_W]} />
+              <meshStandardMaterial color={DUCT_SKIN} roughness={0.55} metalness={0.55} />
+            </mesh>
+            {/* Trunk seam strips (Pittsburgh lock, every 1.2 m) */}
+            {Array.from({ length: Math.ceil(TRUNK_LEN / 1.2) }).map((_, si) => (
+              <mesh
+                key={`trunk-seam-${si}`}
+                position={[TRUNK_X_END + si * 1.2, SUP_Y_CEIL + DUCT_H, TRUNK_Z_CTR]}
+              >
+                <boxGeometry args={[0.03, 0.03, DUCT_W + 0.04]} />
+                <meshStandardMaterial color={DUCT_DARK} roughness={0.6} metalness={0.6} />
+              </mesh>
+            ))}
+            {/* Duct hanger rods (every 2.4 m — code maximum) */}
+            {Array.from({ length: Math.ceil(TRUNK_LEN / 2.4) }).map((_, hi) => {
+              const hx = TRUNK_X_END + hi * 2.4;
+              return (
+                <group key={`trunk-hanger-${hi}`}>
+                  {[-DUCT_W / 2 + 0.10, DUCT_W / 2 - 0.10].map((hz, hzi) => (
+                    <mesh key={`hrod-${hi}-${hzi}`} position={[hx, 11.5, TRUNK_Z_CTR + hz]}>
+                      <cylinderGeometry args={[0.016, 0.016, 11.5 - (SUP_Y_CEIL + DUCT_H), 6]} />
+                      <meshStandardMaterial color="#5a5e64" roughness={0.5} metalness={0.85} />
+                    </mesh>
+                  ))}
+                  {/* Trapeze angle iron */}
+                  <mesh position={[hx, SUP_Y_CEIL + DUCT_H + 0.04, TRUNK_Z_CTR]}>
+                    <boxGeometry args={[0.06, 0.06, DUCT_W + 0.30]} />
+                    <meshStandardMaterial color="#4a4e54" roughness={0.55} metalness={0.75} />
+                  </mesh>
+                </group>
+              );
+            })}
+
+            {/* ── Branch ducts dropping off the south face of the supply trunk ── */}
+            {BRANCH_DROPS.map((bx, bi) => (
+              <group key={`branch-${bi}`}>
+                {/* Branch duct body */}
+                <mesh
+                  position={[bx, SUP_Y_CEIL + DUCT_H / 4, TRUNK_Z_CTR + DUCT_W / 2 + BRANCH_LEN / 2]}
+                  castShadow
+                >
+                  <boxGeometry args={[0.90, 0.50, BRANCH_LEN]} />
+                  <meshStandardMaterial color={DUCT_SKIN} roughness={0.55} metalness={0.55} />
+                </mesh>
+                {/* Branch takeoff / tee at trunk */}
+                <mesh
+                  position={[bx, SUP_Y_CEIL + DUCT_H / 2 + 0.10, TRUNK_Z_CTR + DUCT_W / 2 + 0.02]}
+                >
+                  <boxGeometry args={[0.95, 0.55, 0.08]} />
+                  <meshStandardMaterial color={DUCT_DARK} roughness={0.6} metalness={0.6} />
+                </mesh>
+                {/* Supply diffuser at branch end — perforated face plate */}
+                <mesh
+                  position={[bx, SUP_Y_CEIL + DUCT_H / 4, TRUNK_Z_CTR + DUCT_W / 2 + BRANCH_LEN + 0.03]}
+                >
+                  <boxGeometry args={[1.10, 0.65, 0.06]} />
+                  <meshStandardMaterial color="#c8ccd2" roughness={0.4} metalness={0.5} />
+                </mesh>
+                {/* Diffuser face grid (horizontal bars) */}
+                {Array.from({ length: 6 }).map((_, gi) => (
+                  <mesh
+                    key={`diff-bar-${bi}-${gi}`}
+                    position={[bx, SUP_Y_CEIL + DUCT_H / 4 - 0.23 + gi * 0.09, TRUNK_Z_CTR + DUCT_W / 2 + BRANCH_LEN + 0.065]}
+                  >
+                    <boxGeometry args={[1.00, 0.015, 0.015]} />
+                    <meshStandardMaterial color={DUCT_DARK} roughness={0.5} metalness={0.7} />
+                  </mesh>
+                ))}
+                {/* Blue airflow indicator light on diffuser frame */}
+                <mesh
+                  position={[bx + 0.42, SUP_Y_CEIL + DUCT_H / 4 + 0.20, TRUNK_Z_CTR + DUCT_W / 2 + BRANCH_LEN + 0.07]}
+                >
+                  <boxGeometry args={[0.08, 0.08, 0.02]} />
+                  <meshStandardMaterial color="#4488cc" emissive="#2266aa" emissiveIntensity={0.8} />
+                </mesh>
+                {/* Branch duct hanger */}
+                <mesh
+                  position={[bx, 11.5, TRUNK_Z_CTR + DUCT_W / 2 + BRANCH_LEN / 2]}
+                >
+                  <cylinderGeometry args={[0.012, 0.012, 11.5 - (SUP_Y_CEIL + 0.50), 6]} />
+                  <meshStandardMaterial color="#5a5e64" roughness={0.5} metalness={0.85} />
+                </mesh>
+                {/* Branch section label */}
+                <Text
+                  position={[bx, BRANCH_Y_CTR + 0.35, TRUNK_Z_CTR + DUCT_W / 2 + 0.60]}
+                  rotation={[0, 0, 0]}
+                  fontSize={0.14}
+                  color="#1a2030"
+                  anchorX="center"
+                  anchorY="middle"
+                >
+                  {`SA-${bi + 1}`}
+                </Text>
+              </group>
+            ))}
+
+            {/* ── Supply volume-control dampers in each branch (motorized VCD) ── */}
+            {BRANCH_DROPS.map((bx, bi) => (
+              <group key={`vcd-${bi}`} position={[bx, SUP_Y_CEIL + DUCT_H / 4, TRUNK_Z_CTR + DUCT_W / 2 + 0.60]}>
+                {/* VCD body (thin slab across branch duct) */}
+                <mesh>
+                  <boxGeometry args={[0.88, 0.48, 0.06]} />
+                  <meshStandardMaterial color="#4a5058" roughness={0.55} metalness={0.65} />
+                </mesh>
+                {/* VCD blade (single blade, horizontal pivot) */}
+                <mesh>
+                  <boxGeometry args={[0.82, 0.03, 0.42]} />
+                  <meshStandardMaterial color="#6a7078" roughness={0.5} metalness={0.7} />
+                </mesh>
+                {/* Actuator box on branch side */}
+                <mesh position={[0.50, 0.10, 0]}>
+                  <boxGeometry args={[0.16, 0.14, 0.12]} />
+                  <meshStandardMaterial color="#2a3240" roughness={0.5} metalness={0.4} />
+                </mesh>
+              </group>
+            ))}
+
+            {/* ═══════════════ RETURN SIDE ═══════════════ */}
+
+            {/* Return air ceiling grilles — one per structural bay on north side */}
+            {BRANCH_DROPS.map((bx, bi) => (
+              <group key={`ret-grille-${bi}`}>
+                {/* Grille face plate */}
+                <mesh
+                  position={[bx, RET_Y_CEIL + 1.20 - 0.03, RET_TRUNK_Z - 0.70]}
+                >
+                  <boxGeometry args={[1.20, 0.05, 0.80]} />
+                  <meshStandardMaterial color="#c0c4c8" roughness={0.4} metalness={0.5} />
+                </mesh>
+                {/* Return grille horizontal bars */}
+                {Array.from({ length: 6 }).map((_, gi) => (
+                  <mesh
+                    key={`ret-bar-${bi}-${gi}`}
+                    position={[bx, RET_Y_CEIL + 1.17, RET_TRUNK_Z - 0.70 - 0.32 + gi * 0.12]}
+                  >
+                    <boxGeometry args={[1.14, 0.015, 0.015]} />
+                    <meshStandardMaterial color={DUCT_DARK} roughness={0.5} metalness={0.7} />
+                  </mesh>
+                ))}
+                {/* Return plenum box from grille to trunk */}
+                <mesh position={[bx, RET_Y_CEIL + 1.20 / 2, RET_TRUNK_Z - 0.30]} castShadow>
+                  <boxGeometry args={[1.10, 1.20, 0.70]} />
+                  <meshStandardMaterial color={DUCT_SKIN} roughness={0.55} metalness={0.55} />
+                </mesh>
+              </group>
+            ))}
+
+            {/* Return trunk running east → toward return riser */}
+            <mesh position={[RET_TRUNK_CTR, RET_Y_CEIL + 0.60, RET_TRUNK_Z]} castShadow receiveShadow>
+              <boxGeometry args={[RET_TRUNK_LEN, 1.20, 1.60]} />
+              <meshStandardMaterial color={DUCT_SKIN} roughness={0.55} metalness={0.55} />
+            </mesh>
+            {/* Return trunk hanger rods */}
+            {Array.from({ length: Math.ceil(RET_TRUNK_LEN / 2.4) }).map((_, hi) => {
+              const hx = RET_X_WEST + hi * 2.4;
+              return (
+                <group key={`ret-hanger-${hi}`}>
+                  {[-0.65, 0.65].map((hz, hzi) => (
+                    <mesh key={`rethrod-${hi}-${hzi}`} position={[hx, 11.5, RET_TRUNK_Z + hz]}>
+                      <cylinderGeometry args={[0.012, 0.012, 11.5 - (RET_Y_CEIL + 1.20), 6]} />
+                      <meshStandardMaterial color="#5a5e64" roughness={0.5} metalness={0.85} />
+                    </mesh>
+                  ))}
+                  <mesh position={[hx, RET_Y_CEIL + 1.20 + 0.04, RET_TRUNK_Z]}>
+                    <boxGeometry args={[0.06, 0.06, 1.50]} />
+                    <meshStandardMaterial color="#4a4e54" roughness={0.55} metalness={0.75} />
+                  </mesh>
+                </group>
+              );
+            })}
+
+            {/* Return trunk seam strips */}
+            {Array.from({ length: Math.ceil(RET_TRUNK_LEN / 1.2) }).map((_, si) => (
+              <mesh
+                key={`ret-seam-${si}`}
+                position={[RET_X_WEST + si * 1.2, RET_Y_CEIL + 1.20, RET_TRUNK_Z]}
+              >
+                <boxGeometry args={[0.03, 0.03, 1.64]} />
+                <meshStandardMaterial color={DUCT_DARK} roughness={0.6} metalness={0.6} />
+              </mesh>
+            ))}
+
+            {/* ═══ RETURN AIR — mounted on the AHU south face ═══
+                The return-air connection is a sheet-metal plenum collar
+                bolted directly to the AHU casing south (−Z) panel, in
+                the OA / mixing-box section.  The return trunk runs along
+                the engine-room ceiling and rises vertically through the
+                roof deck into this collar.
+
+                OA section world X centre = AHU_X + (OA_X_MIN+OA_X_MAX)/2
+                  = AHU_X + (−9.0 + −5.5)/2 = AHU_X − 7.25 = −29.25
+                South face world Z = AHU_SOUTH_Z
+                Collar sits at mid-height of the casing on that face. */}
+            {(() => {
+              const OA_SEC_WX  = AHU_X - 7.25;       // world X of OA section centre
+              const COL_W      = 2.20;                // collar width (along X)
+              const COL_H      = 1.80;                // collar height (along Y)
+              const COL_D      = 0.30;                // collar depth (along Z, protruding south)
+              const COL_CY     = AHU_Y - 0.20;        // collar centre Y (mid-casing)
+              const COL_FACE_Z = AHU_SOUTH_Z - COL_D / 2;  // collar box centre Z
+
+              /* Return riser rises from the return trunk to the collar inlet face */
+              const RET_RISER_X   = OA_SEC_WX;
+              const RET_RISER_Z   = RET_TRUNK_Z;
+              const RET_RISER_BOT = RET_Y_CEIL + 1.20;
+              const RET_RISER_TOP = AHU_SOUTH_Z - COL_D;   // bottom of collar
+              const RET_RISER_LEN = RET_RISER_TOP - RET_RISER_BOT;
+              const RET_RISER_CTR = (RET_RISER_BOT + RET_RISER_TOP) / 2;
+
+              /* Horizontal rooftop run from riser to directly below collar */
+              const ROOF_RUN_LEN_Z = Math.abs(RET_RISER_Z - AHU_SOUTH_Z);
+              const ROOF_RUN_CTR_Z = (RET_RISER_Z + AHU_SOUTH_Z) / 2;
+              const ROOF_ELBOW_Y   = RET_Y_CEIL + 1.20; // top of riser = bottom of elbow
+
+              return (
+                <group name="ahu:return-air-assembly">
+                  {/* ── Collar / plenum box bolted onto AHU south face ── */}
+                  <mesh position={[OA_SEC_WX, COL_CY, COL_FACE_Z]} castShadow>
+                    <boxGeometry args={[COL_W, COL_H, COL_D]} />
+                    <meshStandardMaterial color={DUCT_SKIN} roughness={0.55} metalness={0.55} />
+                  </mesh>
+                  {/* Collar flange bolted to AHU casing — dark border ring */}
+                  {[
+                    [COL_W / 2 + 0.05, 0],
+                    [-COL_W / 2 - 0.05, 0],
+                    [0, COL_H / 2 + 0.05],
+                    [0, -COL_H / 2 - 0.05],
+                  ].map(([dx, dy], fi) => (
+                    <mesh
+                      key={`col-flg-${fi}`}
+                      position={[OA_SEC_WX + dx, COL_CY + dy, AHU_SOUTH_Z - 0.02]}
+                    >
+                      <boxGeometry
+                        args={[
+                          Math.abs(dy) > 0 ? COL_W + 0.12 : 0.07,
+                          Math.abs(dy) > 0 ? 0.07 : COL_H + 0.12,
+                          0.04,
+                        ]}
+                      />
+                      <meshStandardMaterial color={DUCT_DARK} roughness={0.6} metalness={0.65} />
+                    </mesh>
+                  ))}
+                  {/* Bolt pattern on collar flange */}
+                  {Array.from({ length: 10 }).map((_, bi) => {
+                    const ang = (bi / 10) * Math.PI * 2;
+                    const bx  = OA_SEC_WX + Math.cos(ang) * (COL_W / 2 + 0.03);
+                    const by  = COL_CY     + Math.sin(ang) * (COL_H / 2 + 0.03);
+                    return (
+                      <mesh key={`col-bolt-${bi}`} position={[bx, by, AHU_SOUTH_Z - 0.03]}>
+                        <cylinderGeometry args={[0.018, 0.018, 0.05, 6]} />
+                        <meshStandardMaterial color="#3b3a38" roughness={0.5} metalness={0.85} />
+                      </mesh>
+                    );
+                  })}
+                  {/* Return-air grille face on the south (outside) face of the collar */}
+                  <mesh position={[OA_SEC_WX, COL_CY, AHU_SOUTH_Z - COL_D - 0.025]}>
+                    <boxGeometry args={[COL_W - 0.04, COL_H - 0.04, 0.05]} />
+                    <meshStandardMaterial color="#c0c4c8" roughness={0.4} metalness={0.5} />
+                  </mesh>
+                  {/* Grille horizontal bars */}
+                  {Array.from({ length: 9 }).map((_, gi) => (
+                    <mesh
+                      key={`ret-col-bar-${gi}`}
+                      position={[OA_SEC_WX, COL_CY - COL_H / 2 + 0.10 + gi * (COL_H - 0.20) / 8, AHU_SOUTH_Z - COL_D - 0.05]}
+                    >
+                      <boxGeometry args={[COL_W - 0.08, 0.018, 0.018]} />
+                      <meshStandardMaterial color={DUCT_DARK} roughness={0.5} metalness={0.7} />
+                    </mesh>
+                  ))}
+
+                  {/* ── Vertical return riser from engine-room ceiling trunk ── */}
+                  <mesh position={[RET_RISER_X, RET_RISER_CTR, RET_RISER_Z]} castShadow>
+                    <boxGeometry args={[COL_W, RET_RISER_LEN, COL_W]} />
+                    <meshStandardMaterial color={DUCT_SKIN} roughness={0.55} metalness={0.55} />
+                  </mesh>
+                  {/* Roof penetration boot on riser */}
+                  <mesh position={[RET_RISER_X, AHU_BASE_Y - 0.12, RET_RISER_Z]}>
+                    <boxGeometry args={[COL_W + 0.22, 0.18, COL_W + 0.22]} />
+                    <meshStandardMaterial color="#7a8088" roughness={0.65} metalness={0.55} />
+                  </mesh>
+                  {/* Riser seam strips */}
+                  {[0, 1, 2, 3].map((si) => (
+                    <mesh
+                      key={`ret-riser-seam-${si}`}
+                      position={[
+                        RET_RISER_X + (si % 2 === 0 ? 1 : -1) * (COL_W / 2 + 0.015),
+                        RET_RISER_CTR,
+                        RET_RISER_Z + (si < 2 ? 1 : -1) * (COL_W / 2 + 0.015),
+                      ]}
+                    >
+                      <boxGeometry args={[0.03, RET_RISER_LEN, 0.03]} />
+                      <meshStandardMaterial color={DUCT_DARK} roughness={0.6} metalness={0.6} />
+                    </mesh>
+                  ))}
+
+                  {/* 90° rooftop elbow: riser turns from +Y to −Z (toward AHU south face) */}
+                  <mesh position={[RET_RISER_X, ROOF_ELBOW_Y + COL_W / 2, AHU_SOUTH_Z + COL_W / 2]}>
+                    <boxGeometry args={[COL_W, COL_W, COL_W]} />
+                    <meshStandardMaterial color={DUCT_SKIN} roughness={0.55} metalness={0.55} />
+                  </mesh>
+
+                  {/* Rooftop horizontal run from elbow to collar south face */}
+                  <mesh position={[RET_RISER_X, RET_Y_CEIL + 1.20 + COL_W / 2, ROOF_RUN_CTR_Z]} castShadow>
+                    <boxGeometry args={[COL_W, COL_H * 0.70, ROOF_RUN_LEN_Z]} />
+                    <meshStandardMaterial color={DUCT_SKIN} roughness={0.55} metalness={0.55} />
+                  </mesh>
+                  {/* Seam on rooftop horizontal */}
+                  {[-COL_W / 2 + 0.015, COL_W / 2 - 0.015].map((dx, si) => (
+                    <mesh
+                      key={`ret-roof-seam-${si}`}
+                      position={[RET_RISER_X + dx, RET_Y_CEIL + 1.20 + COL_W / 2, ROOF_RUN_CTR_Z]}
+                    >
+                      <boxGeometry args={[0.03, COL_H * 0.70 + 0.04, ROOF_RUN_LEN_Z]} />
+                      <meshStandardMaterial color={DUCT_DARK} roughness={0.6} metalness={0.6} />
+                    </mesh>
+                  ))}
+
+                  {/* Return duct service label on the collar face */}
+                  <Text
+                    position={[OA_SEC_WX, COL_CY + COL_H / 2 + 0.25, AHU_SOUTH_Z - COL_D / 2]}
+                    fontSize={0.20}
+                    color="#1a2030"
+                    anchorX="center"
+                    anchorY="middle"
+                  >
+                    RETURN AIR
+                  </Text>
+                  <Text
+                    position={[OA_SEC_WX, COL_CY - COL_H / 2 - 0.18, AHU_SOUTH_Z - COL_D / 2]}
+                    fontSize={0.13}
+                    color="#4a5058"
+                    anchorX="center"
+                    anchorY="middle"
+                  >
+                    RA-1 / AHU-1
+                  </Text>
+                </group>
+              );
+            })()}
+
+            {/* Supply duct label on engine-room trunk */}
+            <Text
+              position={[TRUNK_X_CTR, SUP_Y_CEIL + DUCT_H + 0.22, TRUNK_Z_CTR]}
+              rotation={[-Math.PI / 2, 0, 0]}
+              fontSize={0.22}
+              color="#1a2030"
+              anchorX="center"
+              anchorY="middle"
+            >
+              SUPPLY AIR — SA-MAIN
+            </Text>
+          </group>
+        );
+      })()}
+
       {/* Chiller GLB model + HMI mounted on the cabinet's +X face (the same
           face that displays the YORK_Baked logo plate, on Cube002_Baked). */}
       <ChillerModel
@@ -3381,6 +4540,7 @@ function EngineRoom({
         onHmiZoom={onHmiZoom}
         hmiLookAtRef={hmiLookAtRef}
         hmiZoomed={hmiZoomed}
+        vfdOccluderRef={vfdOccluderRef}
       />
 
       {/* ─── YORK OptiSpeed™ VARIABLE FREQUENCY DRIVE ───
@@ -3398,11 +4558,14 @@ function EngineRoom({
            leaving full clearance to the OptiView HMI on the chiller. */}
       {(() => {
         // Cabinet siting (matches Vfd defaults: W=1.6 along Z, D=0.8 along X,
-        // H=3.05 along Y, sitting on a PLINTH_H=0.20 m housekeeping pad).
+        // H=3.85 along Y, sitting on a PLINTH_H=0.20 m housekeeping pad).
+        // The taller 3.85 m enclosure represents a fully-loaded YORK
+        // OptiSpeed™ lineup (control + power + harmonic-mitigation bays)
+        // and gives the drive proper visual presence next to the chiller.
         const VFD_X     = 4.2;
         const VFD_Z     = -2.6;
         const VFD_W     = 1.6;
-        const VFD_H     = 3.05;
+        const VFD_H     = 3.85;
         const VFD_D     = 0.8;
         const PLINTH_H  = 0.20;
         const UPPER_FRAC = 0.58;
@@ -3446,6 +4609,7 @@ function EngineRoom({
               screenAnchorRef={vfdScreenAnchorRef}
               zoomed={vfdZoomed}
               onZoom={onVfdZoom}
+              occluderRef={vfdOccluderRef}
             />
             <VfdWiring
               vfdTopHub={TOP_HUB}
@@ -3814,18 +4978,16 @@ function EngineRoom({
         label="TBV-1"
       />
 
-      {/* ─── CDWS tower-side vertical riser accessories (x = 23.5, z = CW_Z_SUPPLY) ─── */}
+      {/* ─── CDWS tower-side vertical riser accessories (x = CW_TOWER_SUP_X = 24.0, z = CW_Z_SUPPLY) ─── */}
       <ButterflyValve
         valveId="pipe_bf_cdws_tower"
-        position={[23.5, 13.9, CW_Z_SUPPLY]}
-        rotation={[0, 0, Math.PI / 2]}
+        position={[CW_TOWER_SUP_X, 14.5, CW_Z_SUPPLY]}
         pipeRadius={MAIN_PIPE_RADIUS}
         outerRadius={MAIN_PIPE_INS_RADIUS}
         bodyColor="#1f5a3a"
       />
       <AirVent
-        position={[23.5, 16.0, CW_Z_SUPPLY]}
-        rotation={[0, 0, Math.PI / 2]}
+        position={[CW_TOWER_SUP_X, 16.5, CW_Z_SUPPLY]}
         pipeRadius={MAIN_PIPE_RADIUS}
       />
 
@@ -3872,27 +5034,31 @@ function EngineRoom({
 
       {/* ─── CDWR rooftop horizontal — air vent ─── */}
       <AirVent
-        position={[4.0, 12.32, CW_Z_RETURN]}
+        position={[4.0, CW_Y_ROOF_TOP - 0.18, CW_Z_RETURN]}
         pipeRadius={MAIN_PIPE_RADIUS}
       />
 
-      {/* ─── CDWR tower-side vertical riser accessories ─── */}
+      {/* ─── CDWR tower-exterior riser accessories (x = CW_TOWER_FLG_X − 0.95 = 22.05) ─── */}
       <ButterflyValve
         valveId="pipe_bf_cdwr_tower"
-        position={[23.5, 13.9, CW_Z_RETURN]}
+        position={[CW_TOWER_FLG_X - 0.95, CW_TOWER_RET_Y - 0.8, CW_Z_RETURN]}
         rotation={[0, 0, Math.PI / 2]}
         pipeRadius={MAIN_PIPE_RADIUS}
         outerRadius={MAIN_PIPE_INS_RADIUS}
         bodyColor="#5a3a1f"
       />
-      <AirVent
-        position={[23.5, 16.0, CW_Z_RETURN]}
-        rotation={[0, 0, Math.PI / 2]}
-        pipeRadius={MAIN_PIPE_RADIUS}
-      />
 
       {/* pid.json — makeup, chemical, pumps, expansion, electrical, FT/PDI/PSV */}
-      <PidPlantSystems />
+      <PidPlantSystems
+        cdwpVfdZoomed={cdwpVfdZoomed}
+        onCdwpVfdZoom={onCdwpVfdZoom}
+        cdwpVfdScreenAnchorRef={cdwpVfdScreenAnchorRef}
+        cdwpVfdOccluderRef={cdwpVfdOccluderRef}
+        chwpVfdZoomed={chwpVfdZoomed}
+        onChwpVfdZoom={onChwpVfdZoom}
+        chwpVfdScreenAnchorRef={chwpVfdScreenAnchorRef}
+        chwpVfdOccluderRef={chwpVfdOccluderRef}
+      />
 
       {/* ─────────────────────────────────────────────────────────────────
           ANIMATED FLOW INDICATORS (pid `animation` — water flow animation
@@ -3905,15 +5071,17 @@ function EngineRoom({
          ───────────────────────────────────────────────────────────────── */}
       {(() => {
         const HEADER_Y = 1.10;
-        /* Engine-room CHW header span (chiller riser → past AHU tee).
-           Chiller risers land at X = CHW_X_SUPPLY (-1.984); AHU tee is at
-           AHU_TEE_X (-13.50). Animate over the visible portion. */
-        const chHdrLen = Math.abs(CHW_X_SUPPLY - AHU_TEE_X);
-        const chHdrCtrX = (CHW_X_SUPPLY + AHU_TEE_X) / 2;
-        /* Rooftop CWS/CWR horizontal runs: from above-chiller riser
-           (X = CW_X_SUPPLY ≈ 0) east to tower-side riser (X = 23.5). */
-        const cdRoofLen = Math.abs(23.5 - CW_X_SUPPLY) - 1.0;
-        const cdRoofCtrX = (23.5 + CW_X_SUPPLY) / 2;
+        /* Engine-room CHW header span (chiller riser → AHU coil riser branch).
+           Chiller risers land at X = CHW_X_SUPPLY (-1.984); AHU coil supply
+           riser is at CHW_RISER_X_SUP. Animate over visible header length. */
+        const chHdrLen = Math.abs(CHW_X_SUPPLY - CHW_RISER_X_SUP);
+        const chHdrCtrX = (CHW_X_SUPPLY + CHW_RISER_X_SUP) / 2;
+        /* Rooftop CWS horizontal run: building riser (X≈CW_X_SUPPLY) → tower riser (X=CW_TOWER_SUP_X).
+           Rooftop CWR horizontal run: tower exterior riser (X≈22.05) → building riser (X≈CW_X_RETURN). */
+        const cdSupRoofLen = Math.max(0.1, (CW_TOWER_SUP_X - 0.40) - (CW_X_SUPPLY + 0.40));
+        const cdSupRoofCtrX = ((CW_X_SUPPLY + 0.40) + (CW_TOWER_SUP_X - 0.40)) / 2;
+        const cdRetRoofLen = Math.max(0.1, (CW_TOWER_FLG_X - 0.95 - 0.40) - (CW_X_RETURN + 0.40));
+        const cdRetRoofCtrX = ((CW_X_RETURN + 0.40) + (CW_TOWER_FLG_X - 0.95 - 0.40)) / 2;
         return (
           <>
             <PipeFlowMarkers
@@ -3922,7 +5090,7 @@ function EngineRoom({
               length={chHdrLen}
               pipeRadius={MAIN_PIPE_RADIUS}
               color="#1c5aa8"
-              flowing={evaporatorWaterFlowing}
+              flowing={chwLoopFlowing}
               direction={-1}
             />
             <PipeFlowMarkers
@@ -3931,27 +5099,117 @@ function EngineRoom({
               length={chHdrLen}
               pipeRadius={MAIN_PIPE_RADIUS}
               color="#7eb8d8"
-              flowing={evaporatorWaterFlowing}
+              flowing={chwLoopFlowing}
               direction={1}
             />
+            {/* CWS roof main: supply travels +X toward tower */}
             <PipeFlowMarkers
               name="flow:CDWS-roof"
-              center={[cdRoofCtrX, 12.38, CW_Z_SUPPLY]}
-              length={cdRoofLen}
+              center={[cdSupRoofCtrX, CW_Y_ROOF_TOP, CW_Z_SUPPLY]}
+              length={cdSupRoofLen}
               pipeRadius={MAIN_PIPE_RADIUS}
               color="#1f7a3a"
-              flowing={condenserWaterFlowing}
+              flowing={cdwLoopFlowing}
               direction={1}
             />
+            {/* CWR roof main: return travels −X back from tower */}
             <PipeFlowMarkers
               name="flow:CDWR-roof"
-              center={[cdRoofCtrX, 12.38, CW_Z_RETURN]}
-              length={cdRoofLen}
+              center={[cdRetRoofCtrX, CW_Y_ROOF_TOP, CW_Z_RETURN]}
+              length={cdRetRoofLen}
               pipeRadius={MAIN_PIPE_RADIUS}
               color="#7ec07a"
-              flowing={condenserWaterFlowing}
+              flowing={cdwLoopFlowing}
               direction={-1}
             />
+
+            {/* Engine-room CWS riser: hot water rises up to roof (+Y) */}
+            <PipeFlowMarkers
+              name="flow:CWS-riser-engine"
+              center={[CW_X_SUPPLY, (CW_Y_FLG_SUP + CW_Y_ROOF_TOP - 0.4) / 2, CW_Z_SUPPLY]}
+              length={Math.max(0.1, CW_Y_ROOF_TOP - 0.4 - CW_Y_FLG_SUP)}
+              pipeRadius={MAIN_PIPE_RADIUS}
+              color="#1f7a3a"
+              flowing={cdwLoopFlowing}
+              axis="y"
+              direction={1}
+              surfaceFace="x"
+            />
+            {/* Engine-room CWR riser: cold water drops down from roof (−Y) */}
+            <PipeFlowMarkers
+              name="flow:CWR-riser-engine"
+              center={[CW_X_RETURN, (CW_Y_FLG_RET + CW_Y_ROOF_TOP - 0.4) / 2, CW_Z_RETURN]}
+              length={Math.max(0.1, CW_Y_ROOF_TOP - 0.4 - CW_Y_FLG_RET)}
+              pipeRadius={MAIN_PIPE_RADIUS}
+              color="#7ec07a"
+              flowing={cdwLoopFlowing}
+              axis="y"
+              direction={-1}
+              surfaceFace="x"
+            />
+
+            {/* CWS tower riser: rises from roof main to fan-deck top entry (+Y) */}
+            <PipeFlowMarkers
+              name="flow:CWS-riser-tower"
+              center={[CW_TOWER_SUP_X, (CW_Y_ROOF_TOP + 0.4 + CW_TOWER_SUP_Y - 0.4) / 2, CW_Z_SUPPLY]}
+              length={Math.max(0.1, CW_TOWER_SUP_Y - 0.4 - (CW_Y_ROOF_TOP + 0.4))}
+              pipeRadius={MAIN_PIPE_RADIUS}
+              color="#1f7a3a"
+              flowing={cdwLoopFlowing}
+              axis="y"
+              direction={1}
+              surfaceFace="-x"
+            />
+            {/* CWR tower exterior drop: cold water drops from basin to roof (−Y) */}
+            <PipeFlowMarkers
+              name="flow:CWR-riser-tower"
+              center={[CW_TOWER_FLG_X - 0.95, (CW_TOWER_RET_Y - 0.4 + CW_Y_ROOF_TOP - 0.4) / 2, CW_Z_RETURN]}
+              length={Math.max(0.1, CW_TOWER_RET_Y - 0.4 - (CW_Y_ROOF_TOP - 0.4))}
+              pipeRadius={MAIN_PIPE_RADIUS}
+              color="#7ec07a"
+              flowing={cdwLoopFlowing}
+              axis="y"
+              direction={-1}
+              surfaceFace="-x"
+            />
+
+            {/* Vertical AHU risers — both at coil-centre X, same Z (below nozzle stubs).
+                Supply drops from coil bottom nozzle → engine-room main (direction +1 up).
+                Return rises from coil top nozzle → engine-room main (direction −1 down).
+                Riser Z = AHU_Z − 3.94 (nozzle flange Z − elbow radius). */}
+            {(() => {
+              const CHW_RISER_WZ = AHU_Z - 3.94;   // both risers share this Z
+              const RISER_TOP_Y  = AHU_BASE_Y - 0.40;  // just below curb underside
+              const RISER_BOT_Y  = 1.40;                // engine-room header elevation
+              const RISER_LEN    = Math.max(0.1, RISER_TOP_Y - RISER_BOT_Y);
+              const RISER_CTR_Y  = (RISER_TOP_Y + RISER_BOT_Y) / 2;
+              return (
+                <>
+                  <PipeFlowMarkers
+                    name="flow:CHWS-riser-AHU"
+                    center={[CHW_RISER_X_SUP, RISER_CTR_Y, CHW_RISER_WZ]}
+                    length={RISER_LEN}
+                    pipeRadius={MAIN_PIPE_RADIUS}
+                    color="#1c5aa8"
+                    flowing={chwLoopFlowing}
+                    axis="y"
+                    direction={1}
+                    surfaceFace="-x"
+                  />
+                  <PipeFlowMarkers
+                    name="flow:CHWR-riser-AHU"
+                    center={[CHW_RISER_X_RET, RISER_CTR_Y, CHW_RISER_WZ]}
+                    length={RISER_LEN}
+                    pipeRadius={MAIN_PIPE_RADIUS}
+                    color="#7eb8d8"
+                    flowing={chwLoopFlowing}
+                    axis="y"
+                    direction={-1}
+                    surfaceFace="-x"
+                  />
+                </>
+              );
+            })()}
           </>
         );
       })()}
@@ -3984,11 +5242,13 @@ function ChillerModel({
   onHmiZoom,
   hmiLookAtRef,
   hmiZoomed,
+  vfdOccluderRef,
 }: {
   position: [number, number, number];
   onHmiZoom: () => void;
   hmiLookAtRef: MutableRefObject<THREE.Vector3>;
   hmiZoomed: boolean;
+  vfdOccluderRef: MutableRefObject<THREE.Mesh | null>;
 }) {
   const { scene } = useGLTF('/models/chiller-r2/Chiller_R2.glb');
   const hmiMountRef = useRef<THREE.Group>(null);
@@ -4126,13 +5386,13 @@ function ChillerModel({
         receiveShadow
       />
       <group ref={hmiMountRef}>
-        <HMIPanel3D onZoom={onHmiZoom} zoomed={hmiZoomed} />
+        <HMIPanel3D onZoom={onHmiZoom} zoomed={hmiZoomed} vfdOccluderRef={vfdOccluderRef} />
       </group>
     </group>
   );
 }
 
-function HMIPanel3D({ onZoom, zoomed }: { onZoom: () => void; zoomed: boolean }) {
+function HMIPanel3D({ onZoom, zoomed, vfdOccluderRef }: { onZoom: () => void; zoomed: boolean; vfdOccluderRef: MutableRefObject<THREE.Mesh | null> }) {
   /* Parent group is pinned by ChillerModel to Cube001_Baked's +X face. The
      cabinet rotates the group so its local +Z normal points outward (world
      +X), so we keep the panel geometry in the local XY plane facing +Z.
@@ -4147,9 +5407,10 @@ function HMIPanel3D({ onZoom, zoomed }: { onZoom: () => void; zoomed: boolean })
          enlarge it — they can't read or interact with the tiny HMI yet.
        - zoomed: the overlay is gone, so the HMI's own buttons receive
          pointer events normally. The user can read/click through the UI. */
+  const housingRef = useRef<THREE.Mesh>(null);
   return (
     <group>
-      <mesh castShadow position={[0, 0, -0.03]}>
+      <mesh ref={housingRef} castShadow position={[0, 0, -0.03]}>
         <boxGeometry args={[HMI_PANEL_W, HMI_PANEL_H, 0.06]} />
         <meshStandardMaterial color="#111111" roughness={0.5} metalness={0.5} />
       </mesh>
@@ -4159,6 +5420,7 @@ function HMIPanel3D({ onZoom, zoomed }: { onZoom: () => void; zoomed: boolean })
       </mesh>
       <Html
         transform
+        occlude={[housingRef, vfdOccluderRef]}
         position={[0, 0, 0.003]}
         distanceFactor={4.35}
         zIndexRange={[28, 1]}
@@ -4214,16 +5476,24 @@ function HMIPanel3D({ onZoom, zoomed }: { onZoom: () => void; zoomed: boolean })
   );
 }
 
-type HmiPanelZoomMode = 'none' | 'hmi' | 'vfd';
+type HmiPanelZoomMode = 'none' | 'hmi' | 'vfd' | 'cdwp-vfd' | 'chwp-vfd';
 
 function CameraController({
   panelZoom,
   hmiLookAtRef,
   vfdLookAtRef,
+  cdwpVfdLookAtRef,
+  chwpVfdLookAtRef,
+  cdwpVfdCamPosRef,
+  chwpVfdCamPosRef,
 }: {
   panelZoom: HmiPanelZoomMode;
   hmiLookAtRef: MutableRefObject<THREE.Vector3>;
   vfdLookAtRef: MutableRefObject<THREE.Vector3>;
+  cdwpVfdLookAtRef: MutableRefObject<THREE.Vector3>;
+  chwpVfdLookAtRef: MutableRefObject<THREE.Vector3>;
+  cdwpVfdCamPosRef: MutableRefObject<THREE.Vector3>;
+  chwpVfdCamPosRef: MutableRefObject<THREE.Vector3>;
 }) {
   const { camera, controls } = useThree() as unknown as {
     camera: THREE.Camera;
@@ -4240,16 +5510,45 @@ function CameraController({
   const fromPosRef = useRef(new THREE.Vector3());
   const fromTargetRef = useRef(new THREE.Vector3());
 
+  /* Snapshot of the camera pose taken the instant the user enters a zoom
+     from `panelZoom === 'none'`. When they later exit the zoom we tween
+     BACK to this exact pose instead of to a hard-coded sim default —
+     which means the technician controller resumes at the player's
+     original eye position with no visible snap on hand-off. */
+  const preZoomPosRef     = useRef(new THREE.Vector3());
+  const preZoomTargetRef  = useRef(new THREE.Vector3());
+  const havePreZoomRef    = useRef(false);
+
   /* Scratch vectors for per-frame work (avoid allocations in useFrame). */
   const toPosRef = useRef(new THREE.Vector3());
   const toTargetRef = useRef(new THREE.Vector3());
-  /* Camera offset from panel center to close-up position. Both OptiView and
-     the VFD door face world +X; +X is "in front of" the glass. */
-  const closeOffsetHmiRef = useRef(new THREE.Vector3(1.0, 0.0, 0.0));
-  const closeOffsetVfdRef = useRef(new THREE.Vector3(0.58, 0.0, 0.0));
+  /* Camera offset from panel center to close-up position for the chiller
+     OptiView HMI and the chiller VFD HMI. Both panels face world +X, so a
+     positive +X offset sits the camera in front of the glass. The pump
+     VFD close-up no longer uses a hard-coded directional offset — its
+     destination camera position is computed each frame inside <EngineRoom/>
+     from the panel anchor's world quaternion (see cdwpVfdCamPosRef /
+     chwpVfdCamPosRef) so it's always normal to the actual front face. */
+  const closeOffsetHmiRef  = useRef(new THREE.Vector3(1.0,  0.0,  0.0));
+  const closeOffsetVfdRef  = useRef(new THREE.Vector3(0.58, 0.0,  0.0));
 
   useFrame((_, delta) => {
     if (panelZoom !== lastModeRef.current) {
+      /* Capture pre-zoom pose once, on the FIRST transition out of 'none'.
+         We use it as the destination on the matching exit so there's no
+         camera snap when the technician controller resumes ownership. */
+      if (lastModeRef.current === 'none' && panelZoom !== 'none') {
+        preZoomPosRef.current.copy(camera.position);
+        preZoomTargetRef.current.copy(
+          controls?.target ??
+            new THREE.Vector3(
+              CHILLER_ORBIT_TARGET[0],
+              CHILLER_ORBIT_TARGET[1],
+              CHILLER_ORBIT_TARGET[2],
+            ),
+        );
+        havePreZoomRef.current = true;
+      }
       lastModeRef.current = panelZoom;
       activeRef.current = true;
       progressRef.current = 0;
@@ -4264,51 +5563,94 @@ function CameraController({
       );
     }
 
-    if (!activeRef.current || progressRef.current >= 1) return;
-
-    progressRef.current = Math.min(progressRef.current + delta * 1.4, 1);
-    const t = progressRef.current;
-    const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-
-    /* Resolve the destination camera position + look-at target. */
+    /* Resolve the destination camera position + look-at target. We do
+       this every frame (not just during the tween) so that:
+        (a) the resolved pose tracks live updates to the panel anchor's
+            world position/quaternion (the pump VFD anchors are moving
+            refs computed inside <EngineRoom/>), and
+        (b) once the tween completes we can KEEP writing the resolved
+            pose to the camera, preventing other camera writers
+            (TechnicianController, PointerLockControls) from drifting
+            it away from the panel — the "camera breaks away when
+            stationary" symptom. */
     if (panelZoom === 'hmi') {
       toTargetRef.current.copy(hmiLookAtRef.current);
       toPosRef.current.copy(hmiLookAtRef.current).add(closeOffsetHmiRef.current);
     } else if (panelZoom === 'vfd') {
       toTargetRef.current.copy(vfdLookAtRef.current);
       toPosRef.current.copy(vfdLookAtRef.current).add(closeOffsetVfdRef.current);
+    } else if (panelZoom === 'cdwp-vfd') {
+      toTargetRef.current.copy(cdwpVfdLookAtRef.current);
+      toPosRef.current.copy(cdwpVfdCamPosRef.current);
+    } else if (panelZoom === 'chwp-vfd') {
+      toTargetRef.current.copy(chwpVfdLookAtRef.current);
+      toPosRef.current.copy(chwpVfdCamPosRef.current);
     } else {
-      toTargetRef.current.set(
-        CHILLER_ORBIT_TARGET[0],
-        CHILLER_ORBIT_TARGET[1],
-        CHILLER_ORBIT_TARGET[2],
-      );
-      toPosRef.current.set(
-        DEFAULT_SIM_CAMERA_POSITION[0],
-        DEFAULT_SIM_CAMERA_POSITION[1],
-        DEFAULT_SIM_CAMERA_POSITION[2],
-      );
+      /* Return-to-world (panelZoom === 'none'): land the camera back
+         exactly where it was just before the zoom began. This is the
+         player's eye position when in walk mode, or their orbit pose
+         in explore mode — either way the next system to take over the
+         camera (TechnicianController in walk mode) inherits the same
+         transform with no visible snap. We fall back to the hard-coded
+         sim default only on first paint, before any zoom has happened. */
+      if (havePreZoomRef.current) {
+        toPosRef.current.copy(preZoomPosRef.current);
+        toTargetRef.current.copy(preZoomTargetRef.current);
+      } else {
+        toTargetRef.current.set(
+          CHILLER_ORBIT_TARGET[0],
+          CHILLER_ORBIT_TARGET[1],
+          CHILLER_ORBIT_TARGET[2],
+        );
+        toPosRef.current.set(
+          DEFAULT_SIM_CAMERA_POSITION[0],
+          DEFAULT_SIM_CAMERA_POSITION[1],
+          DEFAULT_SIM_CAMERA_POSITION[2],
+        );
+      }
     }
 
-    camera.position.lerpVectors(fromPosRef.current, toPosRef.current, ease);
+    /* If we're currently tweening, advance progress and lerp. */
+    if (activeRef.current && progressRef.current < 1) {
+      progressRef.current = Math.min(progressRef.current + delta * 1.4, 1);
+      const t = progressRef.current;
+      const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 
-    /* Drive the OrbitControls target in lock-step. Without this, drei's
-       <OrbitControls> would re-orient the camera every frame back toward
-       its previous target (CHILLER_ORBIT_TARGET) — fighting our lookAt
-       and pushing the HMI off-screen. */
-    if (controls?.target) {
-      controls.target.lerpVectors(
-        fromTargetRef.current,
-        toTargetRef.current,
-        ease,
-      );
-      controls.update?.();
-    } else {
-      camera.lookAt(toTargetRef.current);
+      camera.position.lerpVectors(fromPosRef.current, toPosRef.current, ease);
+
+      /* Drive the OrbitControls target in lock-step. Without this, drei's
+         <OrbitControls> would re-orient the camera every frame back toward
+         its previous target (CHILLER_ORBIT_TARGET) — fighting our lookAt
+         and pushing the HMI off-screen. */
+      if (controls?.target) {
+        controls.target.lerpVectors(
+          fromTargetRef.current,
+          toTargetRef.current,
+          ease,
+        );
+        controls.update?.();
+      } else {
+        camera.lookAt(toTargetRef.current);
+      }
+
+      if (progressRef.current >= 1) {
+        activeRef.current = false;
+      }
+      return;
     }
 
-    if (progressRef.current >= 1) {
-      activeRef.current = false;
+    /* Tween is done. While the user is still zoomed into a panel, keep
+       pinning the camera to the resolved pose so nothing else can pull
+       it away. (When panelZoom === 'none' we leave the camera alone so
+       walk-mode / orbit controls own the transform.) */
+    if (panelZoom !== 'none') {
+      camera.position.copy(toPosRef.current);
+      if (controls?.target) {
+        controls.target.copy(toTargetRef.current);
+        controls.update?.();
+      } else {
+        camera.lookAt(toTargetRef.current);
+      }
     }
   });
 
@@ -4317,11 +5659,33 @@ function CameraController({
 
 export default function App() {
   const [showCxAlloy, setShowCxAlloy] = useState(false);
-  const [zoomedHMI, setZoomedHMI] = useState(false);
-  const [zoomedVfd, setZoomedVfd] = useState(false);
-  const hmiLookAtRef = useRef(new THREE.Vector3(0, 2.5, 0));
-  const vfdLookAtRef = useRef(new THREE.Vector3(4.6, 2.2, -2.6));
-  const panelZoom: HmiPanelZoomMode = zoomedVfd ? 'vfd' : zoomedHMI ? 'hmi' : 'none';
+  const [zoomedHMI, setZoomedHMI]     = useState(false);
+  const [zoomedVfd, setZoomedVfd]     = useState(false);
+  const [zoomedCdwpVfd, setZoomedCdwpVfd] = useState(false);
+  const [zoomedChwpVfd, setZoomedChwpVfd] = useState(false);
+  const hmiLookAtRef     = useRef(new THREE.Vector3(0, 2.5, 0));
+  const vfdLookAtRef     = useRef(new THREE.Vector3(4.6, 2.2, -2.6));
+  const cdwpVfdLookAtRef = useRef(new THREE.Vector3(0, 2.5, 9.0));
+  const chwpVfdLookAtRef = useRef(new THREE.Vector3(-2.0, 2.5, -9.5));
+  /* Camera-position refs for the pump VFD zooms. Populated each frame
+     inside <EngineRoom/>'s useFrame from the panel anchor's WORLD
+     quaternion + a fixed standoff distance, so the camera always lands
+     exactly normal to the actual front face of whichever ABB control
+     panel was clicked — regardless of how the cabinet is rotated in
+     world space. Replaces the previous hard-coded directional offset
+     that was zooming "into the wall" instead of onto the panel. */
+  const cdwpVfdCamPosRef = useRef(new THREE.Vector3(0, 1.6, 8.0));
+  const chwpVfdCamPosRef = useRef(new THREE.Vector3(-2.0, 1.6, -8.5));
+  const panelZoom: HmiPanelZoomMode =
+    zoomedVfd     ? 'vfd'      :
+    zoomedHMI     ? 'hmi'      :
+    zoomedCdwpVfd ? 'cdwp-vfd' :
+    zoomedChwpVfd ? 'chwp-vfd' : 'none';
+
+  const clearAllZoom = () => {
+    setZoomedHMI(false); setZoomedVfd(false);
+    setZoomedCdwpVfd(false); setZoomedChwpVfd(false);
+  };
   // Keep browser page-zoom (Ctrl/Cmd + wheel, trackpad pinch) from scaling the chrome
   // (top bar, iPad widget). OrbitControls still receives the wheel event for dolly.
   useEffect(() => {
@@ -4442,18 +5806,20 @@ export default function App() {
             </Clouds>
             <Scene />
             <EngineRoom
-              onHmiZoom={() => {
-                setZoomedVfd(false);
-                setZoomedHMI(true);
-              }}
+              onHmiZoom={() => { clearAllZoom(); setZoomedHMI(true); }}
               hmiLookAtRef={hmiLookAtRef}
               hmiZoomed={zoomedHMI}
-              onVfdZoom={() => {
-                setZoomedHMI(false);
-                setZoomedVfd(true);
-              }}
+              onVfdZoom={() => { clearAllZoom(); setZoomedVfd(true); }}
               vfdLookAtRef={vfdLookAtRef}
               vfdZoomed={zoomedVfd}
+              onCdwpVfdZoom={() => { clearAllZoom(); setZoomedCdwpVfd(true); }}
+              onChwpVfdZoom={() => { clearAllZoom(); setZoomedChwpVfd(true); }}
+              cdwpVfdZoomed={zoomedCdwpVfd}
+              chwpVfdZoomed={zoomedChwpVfd}
+              cdwpVfdLookAtRef={cdwpVfdLookAtRef}
+              chwpVfdLookAtRef={chwpVfdLookAtRef}
+              cdwpVfdCamPosRef={cdwpVfdCamPosRef}
+              chwpVfdCamPosRef={chwpVfdCamPosRef}
             />
             <InspectRaycaster />
 
@@ -4462,13 +5828,30 @@ export default function App() {
               panelZoom={panelZoom}
               hmiLookAtRef={hmiLookAtRef}
               vfdLookAtRef={vfdLookAtRef}
+              cdwpVfdLookAtRef={cdwpVfdLookAtRef}
+              chwpVfdLookAtRef={chwpVfdLookAtRef}
+              cdwpVfdCamPosRef={cdwpVfdCamPosRef}
+              chwpVfdCamPosRef={chwpVfdCamPosRef}
             />
 
             {/* HVAC technician — first-person camera, WASD / Arrows to move,
                 Shift to run, mouse-look via PointerLockControls (click to lock,
-                Esc to release pointer-lock). */}
-            <TechnicianController enabled spawnPosition={[10, 0, 12]} />
-            <PointerLockControls makeDefault />
+                Esc to release pointer-lock).
+
+                While a panel is zoomed (`panelZoom !== 'none'`) we PAUSE
+                the technician (so its useFrame stops writing camera.position
+                every frame) AND we unmount PointerLockControls (so mouse
+                motion doesn't keep rotating the camera quaternion).
+                Together this lets <CameraController/> be the sole owner of
+                the camera transform while the operator is reading an
+                instrument panel — fixing the symptom of the camera
+                "breaking away" from the panel once the zoom tween settles. */}
+            <TechnicianController
+              enabled
+              paused={panelZoom !== 'none'}
+              spawnPosition={[10, 0, 12]}
+            />
+            {panelZoom === 'none' && <PointerLockControls makeDefault />}
           </Suspense>
         </Canvas>
       </div>
@@ -4522,10 +5905,7 @@ export default function App() {
       {panelZoom !== 'none' && (
         <button
           type="button"
-          onClick={() => {
-            setZoomedHMI(false);
-            setZoomedVfd(false);
-          }}
+          onClick={clearAllZoom}
           style={{
             position: 'absolute',
             top: 16,
@@ -4543,7 +5923,10 @@ export default function App() {
             boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
           }}
         >
-          {panelZoom === 'vfd' ? '← Exit drive HMI' : '← Exit OptiView'}
+          {panelZoom === 'vfd'      ? '← Exit VFD HMI'      :
+           panelZoom === 'cdwp-vfd' ? '← Exit CDWP VFD HMI' :
+           panelZoom === 'chwp-vfd' ? '← Exit CHWP VFD HMI' :
+                                      '← Exit OptiView'}
         </button>
       )}
     </div>

@@ -2,7 +2,7 @@
  * YORK water-cooled plant add-ons per pid.json / must_install_components.
  * Layout constants mirror EngineRoom in App.tsx — keep in sync when moving equipment.
  */
-import { type JSX } from 'react';
+import { type JSX, type MutableRefObject } from 'react';
 import { Text, Billboard } from '@react-three/drei';
 import * as THREE from 'three';
 import { useSimulationStore } from '../../store/useSimulationStore';
@@ -26,6 +26,7 @@ import {
 } from './PipingAccessories';
 import { PipeFlowMarkers } from './PipeFlowMarkers';
 import { usePlantLayerStore } from '../../store/usePlantLayerStore';
+import { useCdwLoopFlowing, useChwLoopFlowing } from '../../hooks/useLoopFlow';
 
 const STEEL          = '#8c8c8c';
 const HANDWHEEL_RED  = '#cc2222';
@@ -636,112 +637,151 @@ function PumpHydraulicTieIns() {
 
       {/* ═══════════════════════════════════════════════════════════════
           CHWP SUCTION TIE-IN
-          Pump suction riser (CHR, light blue) at (chwSucX ≈ −5.58, CY, −9.5).
-          CHR header runs at (*, HEADER_Y, CHW_ZR = −6.675).
+          Pump suction riser (CHR, light blue) tops out at the engine-room
+          ceiling at (chwSucX ≈ −5.58, CY, −9.5). The CHR header runs at
+          (*, HEADER_Y, CHW_ZR = −6.675).
 
-          Path (drop from PUMP_CEILING_Y to HEADER_Y, then +Z to header):
+          The pump itself occupies the column (chwSucX..chwDisX, 0..2.5,
+          −10.15..−7.71), so we cannot drop the bridge straight from the
+          ceiling to HEADER_Y at z=−9.5 — that would clip the pump body
+          and overlap the existing suction riser. Instead, route OVER the
+          pump at PUMP_CEILING_Y, traverse +Z until clear of the pump
+          body (z = CHW_ZR), then drop straight down to the header tee.
+
+          Path:
             pump riser top (chwSucX, CY, −9.5)
-              → vertical drop to (chwSucX, HEADER_Y, −9.5)      [corner: −Y → +Z]
-              → +Z spool to (chwSucX, HEADER_Y, CHW_ZR)
-              → tee saddle into CHR header
+              → elbow A [−Y / +Z]
+              → +Z ceiling spool to (chwSucX, CY, CHW_ZR)
+              → elbow B [−Z / −Y]
+              → vertical drop to (chwSucX, HEADER_Y, CHW_ZR)
+              → tee saddle into CHR header (branch from +Y above)
          ══════════════════════════════════════════════════════════════ */}
       <group name="tie:CHWP-suction-bridge">
-        {/* Vertical drop: riser top → +Y tangent of the elbow (stops ER
-            above HEADER_Y so the elbow arc seats flush). */}
-        <StraightPipe3D
-          a={chwSucRiserTop}
-          b={[chwSucX, HEADER_Y + ER, chwSucZ]}
-          pipeRadius={BR}
-          pipeColor={PUMP_COLOR.CHR}
-        />
-        {/* Long-radius elbow: corner at (chwSucX, HEADER_Y, −9.5);
-            legs extend in +Y (back up the riser) and +Z (along the header). */}
+        {/* Elbow A — at the riser top, transitions vertical pump riser
+            (extending −Y back into the pump) into the +Z ceiling spool. */}
         <ElbowAt
-          corner={[chwSucX, HEADER_Y, chwSucZ]}
-          axisA="y"
+          corner={chwSucRiserTop}
+          axisA="-y"
           axisB="z"
           pipeRadius={BR}
           pipeColor={PUMP_COLOR.CHR}
         />
-        {/* +Z spool: elbow exit → outer face of the tee saddle on the CHR
-            header (header runs along X at z=CHW_ZR; bridge approaches
-            from −Z, so it lands on the saddle's −Z face). */}
+        {/* +Z ceiling spool: elbow A exit → elbow B entry, at PUMP_CEILING_Y,
+            traversing the +Z gap from above the pump to above the header. */}
         <StraightPipe3D
-          a={[chwSucX, HEADER_Y, chwSucZ + ER]}
-          b={[chwSucX, HEADER_Y, CHW_ZR - TEE_BRANCH_OFFSET]}
+          a={[chwSucX, PUMP_CEILING_Y, chwSucZ + ER]}
+          b={[chwSucX, PUMP_CEILING_Y, CHW_ZR - ER]}
           pipeRadius={BR}
           pipeColor={PUMP_COLOR.CHR}
         />
-        {/* Tee saddle on CHR header (header runs along X, branch projects
-            in −Z toward the bridge). */}
+        {/* Elbow B — at (chwSucX, CY, CHW_ZR); transitions the −Z ceiling
+            spool into the vertical drop heading down to the header. */}
+        <ElbowAt
+          corner={[chwSucX, PUMP_CEILING_Y, CHW_ZR]}
+          axisA="-z"
+          axisB="-y"
+          pipeRadius={BR}
+          pipeColor={PUMP_COLOR.CHR}
+        />
+        {/* Vertical drop: elbow B exit → outer face of the tee saddle on
+            the CHR header (saddle stub projects up in +Y). */}
+        <StraightPipe3D
+          a={[chwSucX, PUMP_CEILING_Y - ER, CHW_ZR]}
+          b={[chwSucX, HEADER_Y + TEE_BRANCH_OFFSET, CHW_ZR]}
+          pipeRadius={BR}
+          pipeColor={PUMP_COLOR.CHR}
+        />
+        {/* Tee saddle on CHR header (header runs along X at z=CHW_ZR;
+            bridge drops from above, so it lands on the saddle's +Y face). */}
         <TeeSaddle
           runPosition={[chwSucX, HEADER_Y, CHW_ZR]}
-          branchAxis="-z"
+          branchAxis="y"
           pipeColor={PUMP_COLOR.CHR}
         />
       </group>
 
       {/* ═══════════════════════════════════════════════════════════════
           CHWP DISCHARGE TIE-IN
-          Pump CHS up-riser top (CHS, dark blue) at (chwDisX ≈ +1.21, CY, −9.5).
-          CHWS header: (*, HEADER_Y, CHW_ZS = −5.525), eastern end at x = −1.984.
+          Pump CHS up-riser tops out at (chwDisX ≈ +1.21, CY, −9.5).
+          CHWS header: (*, HEADER_Y, CHW_ZS = −5.525), eastern end at
+          x = xHdr = −1.984 (which happens to be the CHWP centerline).
 
-          Since chwDisX > xHdr, bridge first goes −X to xHdr, then +Z to header.
-          Path (drop from PUMP_CEILING_Y to HEADER_Y, then manoeuvre to header):
+          We must avoid the pump body entirely — it occupies roughly
+          (chwSucX..chwDisX, 0..2.5, −10.15..−7.71). Routing the bridge
+          at HEADER_Y across the pump (the previous design) clipped the
+          motor and the discharge train. Instead, route OVER the pump at
+          PUMP_CEILING_Y all the way to the CHWS header centerline
+          (xHdr, *, CHW_ZS), then drop straight down to the tee. CHW_ZS
+          (≈ −5.525) is well north of the pump body in Z, so the drop
+          column is clear.
+
+          Path:
             riser top (chwDisX, CY, −9.5)
-              → vertical drop to (chwDisX, HEADER_Y, −9.5)      [corner A: −Y → −X]
-              → −X spool to (xHdr, HEADER_Y, −9.5)              [corner B: −X → +Z]
-              → +Z spool to (xHdr, HEADER_Y, CHW_ZS)
-              → tee saddle into CHWS header
+              → elbow A [−Y / −X]
+              → −X ceiling spool to (xHdr, CY, −9.5)
+              → elbow B [+X / +Z]
+              → +Z ceiling spool to (xHdr, CY, CHW_ZS)
+              → elbow C [−Z / −Y]
+              → vertical drop to (xHdr, HEADER_Y, CHW_ZS)
+              → tee saddle into CHWS header (branch from +Y above)
          ══════════════════════════════════════════════════════════════ */}
       <group name="tie:CHWP-discharge-bridge">
-        {/* Vertical drop: riser top → +Y tangent of elbow A (stops ER
-            above HEADER_Y so the elbow arc seats flush). */}
-        <StraightPipe3D
-          a={chwChsRiserTop}
-          b={[chwDisX, HEADER_Y + ER, chwDisZ]}
-          pipeRadius={BR}
-          pipeColor={PUMP_COLOR.CHS}
-        />
-        {/* Elbow A: corner at (chwDisX, HEADER_Y, −9.5);
-            legs extend in +Y (back up the riser) and −X (over to header). */}
+        {/* Elbow A — at the riser top, transitions vertical pump riser
+            (extending −Y back into the pump) into the −X ceiling spool. */}
         <ElbowAt
-          corner={[chwDisX, HEADER_Y, chwDisZ]}
-          axisA="y"
+          corner={chwChsRiserTop}
+          axisA="-y"
           axisB="-x"
           pipeRadius={BR}
           pipeColor={PUMP_COLOR.CHS}
         />
-        {/* −X spool to header eastern-tee X */}
+        {/* −X ceiling spool: elbow A exit → elbow B entry, at PUMP_CEILING_Y,
+            traversing over the pump from chwDisX to xHdr. */}
         <StraightPipe3D
-          a={[chwDisX - ER, HEADER_Y, chwDisZ]}
-          b={[xHdr + ER, HEADER_Y, chwDisZ]}
+          a={[chwDisX - ER, PUMP_CEILING_Y, chwDisZ]}
+          b={[xHdr + ER, PUMP_CEILING_Y, chwDisZ]}
           pipeRadius={BR}
           pipeColor={PUMP_COLOR.CHS}
         />
-        {/* Elbow B: corner at (xHdr, HEADER_Y, −9.5);
-            legs extend in +X (back to elbow A) and +Z (along the CHWS header). */}
+        {/* Elbow B — at (xHdr, CY, −9.5); transitions the +X ceiling spool
+            into the +Z ceiling spool heading toward the header. */}
         <ElbowAt
-          corner={[xHdr, HEADER_Y, chwDisZ]}
+          corner={[xHdr, PUMP_CEILING_Y, chwDisZ]}
           axisA="x"
           axisB="z"
           pipeRadius={BR}
           pipeColor={PUMP_COLOR.CHS}
         />
-        {/* +Z spool: elbow exit → outer face of the tee saddle on the
-            CHWS header (header runs along X at z=CHW_ZS; bridge
-            approaches from −Z, so it lands on the saddle's −Z face). */}
+        {/* +Z ceiling spool: elbow B exit → elbow C entry, at PUMP_CEILING_Y,
+            traversing the +Z gap from above the pump to above the header. */}
         <StraightPipe3D
-          a={[xHdr, HEADER_Y, chwDisZ + ER]}
-          b={[xHdr, HEADER_Y, CHW_ZS - TEE_BRANCH_OFFSET]}
+          a={[xHdr, PUMP_CEILING_Y, chwDisZ + ER]}
+          b={[xHdr, PUMP_CEILING_Y, CHW_ZS - ER]}
           pipeRadius={BR}
           pipeColor={PUMP_COLOR.CHS}
         />
-        {/* Tee saddle into CHWS header (header runs along X, branch
-            projects in −Z toward the bridge). */}
+        {/* Elbow C — at (xHdr, CY, CHW_ZS); transitions the −Z ceiling spool
+            into the vertical drop heading down to the header. */}
+        <ElbowAt
+          corner={[xHdr, PUMP_CEILING_Y, CHW_ZS]}
+          axisA="-z"
+          axisB="-y"
+          pipeRadius={BR}
+          pipeColor={PUMP_COLOR.CHS}
+        />
+        {/* Vertical drop: elbow C exit → outer face of the tee saddle on
+            the CHWS header (saddle stub projects up in +Y). */}
+        <StraightPipe3D
+          a={[xHdr, PUMP_CEILING_Y - ER, CHW_ZS]}
+          b={[xHdr, HEADER_Y + TEE_BRANCH_OFFSET, CHW_ZS]}
+          pipeRadius={BR}
+          pipeColor={PUMP_COLOR.CHS}
+        />
+        {/* Tee saddle on CHWS header (header runs along X at z=CHW_ZS;
+            bridge drops from above, so it lands on the saddle's +Y face). */}
         <TeeSaddle
           runPosition={[xHdr, HEADER_Y, CHW_ZS]}
-          branchAxis="-z"
+          branchAxis="y"
           pipeColor={PUMP_COLOR.CHS}
         />
       </group>
@@ -2367,23 +2407,36 @@ function PlantFlowMarkers({
   const bridgeZlen   = Math.max(0.1, bridgeZfrom - bridgeZto);
   const bridgeZctr   = (bridgeZfrom + bridgeZto) / 2;
 
-  /* ── CHWP suction drop — +Z horizontal spool at HEADER_Y ──
-     From (chwSucX, HDR_Y, chwSucZ + ER) to the tee saddle on the
-     CHR header at (chwSucX, HDR_Y, CHW_ZR − TEE_OFFSET). */
+  /* ── CHWP suction ceiling bridge — +Z spool at PUMP_CEILING_Y ──
+     Routes OVER the pump from the suction-riser top at
+     (chwSucX, CY, −9.5) north to (chwSucX, CY, CHW_ZR), where it
+     turns down to the CHR header. (See PumpHydraulicTieIns:
+     "tie:CHWP-suction-bridge" for the full path.) */
   const chwSucRiserWorldX = CHWP_ORIGIN[0] + chwLay.xRiser;
   const chwSucZ_FM   = CHWP_ORIGIN[2];  // −9.5
   const chwSucZfrom  = chwSucZ_FM + ER_FM;
-  const chwSucZto    = CHW_ZR - TEE_OFFSET_FM;
+  const chwSucZto    = CHW_ZR - ER_FM;
   const chwSucZlen   = Math.max(0.1, chwSucZto - chwSucZfrom);
   const chwSucZctr   = (chwSucZfrom + chwSucZto) / 2;
 
-  /* ── CHWP discharge cross — +Z horizontal spool at HEADER_Y ──
-     From (xHdr, HDR_Y, chwDisZ + ER) to the tee saddle on the
-     CHWS header at (xHdr, HDR_Y, CHW_ZS − TEE_OFFSET). */
+  /* ── CHWP discharge ceiling bridge — −X then +Z spools at PUMP_CEILING_Y ──
+     Routes OVER the pump from the discharge-riser top at
+     (chwDisX, CY, −9.5) west to (xHdr, CY, −9.5), then north to
+     (xHdr, CY, CHW_ZS), where it drops to the CHWS header.
+     (See PumpHydraulicTieIns: "tie:CHWP-discharge-bridge".) */
   const xHdr_FM      = -1.984;
+  const chwDisX_FM   = CHWP_ORIGIN[0] + chwLay.xDischargeRiserX;
   const chwDisZ_FM   = CHWP_ORIGIN[2];  // −9.5
+
+  /* −X leg over the pump, at PUMP_CEILING_Y, z=chwDisZ */
+  const chwDisXfrom  = chwDisX_FM - ER_FM;     // east end (near pump riser)
+  const chwDisXto    = xHdr_FM + ER_FM;        // west end (above header column)
+  const chwDisXlen   = Math.max(0.1, chwDisXfrom - chwDisXto);
+  const chwDisXctr   = (chwDisXfrom + chwDisXto) / 2;
+
+  /* +Z leg from above pump column to above CHWS header, at x=xHdr */
   const chwDisZfrom  = chwDisZ_FM + ER_FM;
-  const chwDisZto    = CHW_ZS - TEE_OFFSET_FM;
+  const chwDisZto    = CHW_ZS - ER_FM;
   const chwDisZlen   = Math.max(0.1, chwDisZto - chwDisZfrom);
   const chwDisZctr   = (chwDisZfrom + chwDisZto) / 2;
 
@@ -2415,23 +2468,44 @@ function PlantFlowMarkers({
         speed={1.2}
         spacing={1.6}
       />
-      {/* CHWP suction drop — +Z horizontal spool at HEADER_Y from pump to CHR header */}
+      {/* CHWP suction ceiling bridge — +Z spool at PUMP_CEILING_Y, x=chwSucX.
+          Return water (CHR) flows FROM the AHU header TOWARD the pump,
+          which on this segment is the −Z direction (from the header at
+          z≈−6.7 toward the pump at z=−9.5). */}
       <PipeFlowMarkers
-        name="flow:CHR-suction-bridge"
-        center={[chwSucRiserWorldX, HDR_Y, chwSucZctr]}
+        name="flow:CHR-suction-ceil-bridge"
+        center={[chwSucRiserWorldX, PUMP_CEILING_Y, chwSucZctr]}
         length={chwSucZlen}
         pipeRadius={0.22}
         color={PUMP_COLOR.CHR}
         flowing={chwFlowing}
         axis="z"
-        direction={1}
+        direction={-1}
         speed={1.2}
         spacing={1.6}
       />
-      {/* CHWP discharge cross — +Z horizontal spool at HEADER_Y from pump to CHWS header */}
+      {/* CHWP discharge ceiling bridge — −X spool at PUMP_CEILING_Y, z=chwDisZ.
+          Supply water (CHS) flows FROM the pump discharge riser TOWARD
+          the header tee at xHdr, i.e., in the −X direction. */}
       <PipeFlowMarkers
-        name="flow:CHS-discharge-bridge"
-        center={[xHdr_FM, HDR_Y, chwDisZctr]}
+        name="flow:CHS-discharge-ceil-bridge-x"
+        center={[chwDisXctr, PUMP_CEILING_Y, chwDisZ_FM]}
+        length={chwDisXlen}
+        pipeRadius={0.22}
+        color={PUMP_COLOR.CHS}
+        flowing={chwFlowing}
+        axis="x"
+        direction={-1}
+        speed={1.2}
+        spacing={1.6}
+      />
+      {/* CHWP discharge ceiling bridge — +Z spool at PUMP_CEILING_Y, x=xHdr.
+          Continues from the −X leg over to the CHWS header column,
+          flowing +Z from above the pump (z=−9.5) to above the header
+          (z=CHW_ZS≈−5.5). */}
+      <PipeFlowMarkers
+        name="flow:CHS-discharge-ceil-bridge-z"
+        center={[xHdr_FM, PUMP_CEILING_Y, chwDisZctr]}
         length={chwDisZlen}
         pipeRadius={0.22}
         color={PUMP_COLOR.CHS}
@@ -2449,9 +2523,40 @@ function PlantFlowMarkers({
  * PID-aligned add-ons: pumps, makeup, chemical, expansion, electrical, extra instruments.
  * Parent: EngineRoom world group (same origin as chiller at [0,0,0]).
  */
-export function PidPlantSystems() {
+export interface PidPlantSystemsProps {
+  /* CDWP VFD zoom */
+  cdwpVfdZoomed?: boolean;
+  onCdwpVfdZoom?: () => void;
+  cdwpVfdScreenAnchorRef?: MutableRefObject<THREE.Group | null>;
+  cdwpVfdOccluderRef?: MutableRefObject<THREE.Mesh | null>;
+  /* CHWP VFD zoom */
+  chwpVfdZoomed?: boolean;
+  onChwpVfdZoom?: () => void;
+  chwpVfdScreenAnchorRef?: MutableRefObject<THREE.Group | null>;
+  chwpVfdOccluderRef?: MutableRefObject<THREE.Mesh | null>;
+}
+
+export function PidPlantSystems({
+  cdwpVfdZoomed,
+  onCdwpVfdZoom,
+  cdwpVfdScreenAnchorRef,
+  cdwpVfdOccluderRef,
+  chwpVfdZoomed,
+  onChwpVfdZoom,
+  chwpVfdScreenAnchorRef,
+  chwpVfdOccluderRef,
+}: PidPlantSystemsProps = {}) {
+  /* Pump-running flag is the master loop flag — pumps spin whenever the
+     loop is energised, even if a user happens to close one isolation
+     valve while the pump is running (which would dead-head the pump in
+     real life). */
   const cdwFlow = useSimulationStore((s) => s.state.condenserWaterFlowing);
   const chwFlow = useSimulationStore((s) => s.state.evaporatorWaterFlowing);
+  /* Animated-arrow flag: master AND every isolation valve along the
+     hydraulic path open. Closing any one of them drops these to false
+     and instantly hides the chevrons everywhere on that loop. */
+  const cdwLoopFlowing = useCdwLoopFlowing();
+  const chwLoopFlowing = useChwLoopFlowing();
   const layers = usePlantLayerStore((s) => s.layers);
 
   return (
@@ -2469,6 +2574,10 @@ export function PidPlantSystems() {
           suctionValveId="pipe_gate_cdwp_suction"
           dischargeValveId="pipe_gate_cdwp_discharge"
           drainValveId="pipe_drain_cdwp_low"
+          vfdZoomed={cdwpVfdZoomed}
+          onVfdZoom={onCdwpVfdZoom}
+          vfdScreenAnchorRef={cdwpVfdScreenAnchorRef}
+          vfdOccluderRef={cdwpVfdOccluderRef}
         />
         <CHWPPumpAssembly
           position={CHWP_ORIGIN}
@@ -2477,6 +2586,10 @@ export function PidPlantSystems() {
           suctionValveId="pipe_gate_chwp_suction"
           dischargeValveId="pipe_gate_chwp_discharge"
           drainValveId="pipe_drain_chwp_low"
+          vfdZoomed={chwpVfdZoomed}
+          onVfdZoom={onChwpVfdZoom}
+          vfdScreenAnchorRef={chwpVfdScreenAnchorRef}
+          vfdOccluderRef={chwpVfdOccluderRef}
         />
         <PumpHydraulicTieIns />
         <ExpansionTankWithLegs position={[-26, 0, CHW_ZR]} />
@@ -2490,7 +2603,7 @@ export function PidPlantSystems() {
         <RooftopRiserAirVents />
         {/* pid `animation` — animated flow chevrons on vertical risers and
             CDWP discharge bridge spool (CHW low-level headers are in App.tsx) */}
-        <PlantFlowMarkers cdwFlowing={cdwFlow} chwFlowing={chwFlow} />
+        <PlantFlowMarkers cdwFlowing={cdwLoopFlowing} chwFlowing={chwLoopFlowing} />
       </group>
 
       {/* ─────────────────────────────────────────────────────────────────

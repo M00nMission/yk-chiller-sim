@@ -2,9 +2,10 @@
    Vfd.tsx
    Variable Frequency Drive (VFD) — floor-standing NEMA 1 enclosure modelled
    after the YORK OptiSpeed™ Solid State Starter / VSD that ships with a
-   YK centrifugal chiller. Dimensions match a real ~600 HP drive cabinet
-   (~1.6 m W × 3.05 m H × 0.8 m D, sitting on a 200 mm housekeeping pad
-   so the door-mounted HMI lands at chest/eye level). Includes:
+   YK centrifugal chiller. Dimensions match a fully-loaded drive cabinet
+   lineup (~1.6 m W × 3.85 m H × 0.8 m D, sitting on a 200 mm housekeeping
+   pad so the door-mounted HMI lands at chest/eye level and the harmonic-
+   mitigation / DC-bus section reads as a proper full-height bay). Includes:
 
      • two-section cabinet (control bay on top, power bay on bottom)
      • hinged doors with louvered ventilation, lift-off hinges, latches
@@ -36,7 +37,7 @@
 
 import { Text, Billboard, Html } from '@react-three/drei';
 import * as THREE from 'three';
-import { useMemo, type RefObject } from 'react';
+import { useMemo, useRef, type RefObject, type MutableRefObject } from 'react';
 import { VfdHMI, VFD_HMI_ASPECT_RATIO } from '../ui/VfdHMI';
 
 type Triple = [number, number, number];
@@ -72,8 +73,9 @@ export interface VfdProps {
   rotation?: Triple;
   /** Cabinet width  (door face W).   Default 1.6 m. */
   width?: number;
-  /** Cabinet height (door face H).   Default 3.05 m (tall floor-standing
-   *  drive enclosure — HMI remains in the upper control bay). */
+  /** Cabinet height (door face H).   Default 3.85 m (tall floor-standing
+   *  drive enclosure with a full upper control bay above the power /
+   *  harmonic-mitigation bay — door-mounted HMI stays at operator height). */
   height?: number;
   /** Cabinet depth.                  Default 0.8 m. */
   depth?: number;
@@ -87,19 +89,23 @@ export interface VfdProps {
   zoomed?: boolean;
   /** Invoked when the user clicks the HMI while not zoomed (same pattern as chiller OptiView). */
   onZoom?: () => void;
+  /** Optional ref filled with the cabinet occluder mesh so external <Html occlude>
+   *  lists can include this cabinet as a blocker (e.g. the chiller HMI panel). */
+  occluderRef?: MutableRefObject<THREE.Mesh | null>;
 }
 
 export function Vfd({
   position = [0, 0, 0],
   rotation = [0, 0, 0],
   width  = 1.6,
-  height = 3.05,
+  height = 3.85,
   depth  = 0.8,
   tag    = 'VSD-1',
   running = true,
   screenAnchorRef,
   zoomed = false,
   onZoom,
+  occluderRef: externalOccluderRef,
 }: VfdProps) {
   const W = width;
   const H = height;
@@ -147,6 +153,12 @@ export function Vfd({
     </mesh>
   );
 
+  /* Invisible occluder box — same footprint as the cabinet body.
+     Passed to <Html occlude> so drei raycasts against a real mesh
+     instead of sampling the depth buffer, eliminating the one-frame
+     "bleed" that occlude="blending" causes during camera movement. */
+  const occluderRef = useRef<THREE.Mesh>(null);
+
   /* Louver slat geometry on the lower-bay door (for heatsink airflow) */
   const louverSlats = useMemo(() => {
     const n = 8;
@@ -164,6 +176,23 @@ export function Vfd({
 
   return (
     <group position={position} rotation={rotation}>
+      {/* Invisible occluder — matches cabinet footprint exactly.
+          Used by <Html occlude> for raycast-based occlusion (no depth
+          buffer readback, so no single-frame "bleed" on camera move).
+          Also forwarded via externalOccluderRef so the chiller HMI panel
+          can list this cabinet as a blocker. */}
+      <mesh
+        ref={(el) => {
+          occluderRef.current = el;
+          if (externalOccluderRef) externalOccluderRef.current = el;
+        }}
+        position={[0, cabY, 0]}
+        visible={false}
+      >
+        <boxGeometry args={[D, H, W]} />
+        <meshBasicMaterial />
+      </mesh>
+
       {/* ─── HOUSEKEEPING PAD / PLINTH ────────────────────────────────── */}
       <mesh position={[0, PLINTH_H / 2, 0]} receiveShadow>
         <boxGeometry args={[D + 0.20, PLINTH_H, W + 0.20]} />
@@ -392,6 +421,7 @@ export function Vfd({
               <group rotation={[0, Math.PI / 2, 0]}>
                 <Html
                   transform
+                  occlude={[occluderRef]}
                   position={[0, 0, 0.007]}
                   distanceFactor={1.02}
                   zIndexRange={[28, 1]}

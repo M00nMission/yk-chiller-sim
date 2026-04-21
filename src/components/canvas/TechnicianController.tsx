@@ -12,8 +12,10 @@
      • Esc                         — release mouse (click canvas to resume)
 
    Roof ladder (back corner — see walkModeWorld.ts)
-     • W / S — climb up / down while inside the ladder shaft
-     • Walk into the roof hatch opening from the deck to descend
+     • W / S — climb up / down at sprint speed while inside the ladder shaft
+     • Press S near the hatch (within ~4.5 m) while on the roof to descend
+     • Press W while facing the hatch (within ~4.5 m) on the roof to descend
+     • Walk directly over the hatch opening to auto-drop into the shaft
 ============================================================================ */
 
 import { useEffect, useRef } from 'react';
@@ -26,7 +28,12 @@ import {
   OUTDOOR_BOUND,
   ROOF_MOVEMENT_BOUND,
   LADDER_ROOF_EXIT,
+  LADDER_ROOF_ENTRY,
+  LADDER_FLOOR_EXIT,
+  LADDER_FLOOR_ENTRY,
   inLadderVolume,
+  nearLadderHatch,
+  nearLadderBase,
   canStandOnRoof,
   volumeBlockMain,
   volumeBlockRoof,
@@ -63,11 +70,22 @@ function hasMovementKey(keys: Record<string, boolean>): boolean {
 
 interface ControllerProps {
   enabled: boolean;
+  /**
+   * When `true`, the controller temporarily stops driving the camera and
+   * stops listening for keyboard input — but unlike toggling `enabled`,
+   * it does NOT run the mount/unmount restore that warps the camera back
+   * to the pre-walk-mode pose. This is what the HMI/VFD zoom flow uses to
+   * hand the camera off to <CameraController/> while the user is reading
+   * an instrument panel, then quietly resumes player movement when the
+   * zoom is exited.
+   */
+  paused?: boolean;
   spawnPosition?: [number, number, number];
 }
 
 export function TechnicianController({
   enabled,
+  paused = false,
   spawnPosition = [10, 0, 12],
 }: ControllerProps) {
   const posRef          = useRef(new THREE.Vector3(...spawnPosition));
@@ -79,15 +97,31 @@ export function TechnicianController({
   const lastForwardTapRef = useRef(0);
   const bobPhaseRef     = useRef(0);
   const scratchRight    = useRef(new THREE.Vector3());
+  /* Set to true when the player initiates a roof-to-ladder descent while W is
+     held. Prevents W from being interpreted as climbUp until the key is
+     released, eliminating the snap-in / pop-out flicker. */
+  const descendingRef   = useRef(false);
+  /* Set to true when the player exits the top of the ladder onto the roof.
+     Blocks the descent-trigger until they've stepped far enough onto the deck
+     that they couldn't accidentally fall straight back in. */
+  const ascentLockRef   = useRef(false);
 
   const setStoreMotion = useWalkModeStore((s) => s.setMotionState);
   const motionStateRef = useRef<'idle' | 'walk' | 'run'>('idle');
 
   const { camera } = useThree();
 
-  /* ─── keyboard listeners (only attached while walk mode is on) ─── */
+  /* ─── keyboard listeners (only attached while walk mode is on AND not
+         paused for an HMI zoom — when paused we both ignore key state and
+         release any held keys so the player doesn't keep walking the
+         instant the zoom is exited) ─── */
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || paused) {
+      /* Drop any held keys so the camera doesn't lurch on resume. */
+      keysRef.current = {};
+      sprintStickyRef.current = false;
+      return;
+    }
 
     const onDown = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
@@ -133,7 +167,7 @@ export function TechnicianController({
       window.removeEventListener('blur', clearAll);
       clearAll();
     };
-  }, [enabled]);
+  }, [enabled, paused]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -174,6 +208,13 @@ export function TechnicianController({
 
   useFrame((_, dtRaw) => {
     if (!enabled) return;
+    /* When paused (e.g. user zoomed into an HMI), stand completely still:
+       skip player physics AND the camera write so <CameraController/> is
+       the sole owner of the camera transform. Without this, this useFrame
+       would clobber camera.position back to the player's eye every frame
+       and the user would see the camera "break away" from the panel the
+       instant the zoom tween completed. */
+    if (paused) return;
     const delta = Math.min(dtRaw, 0.05);
 
     const x = posRef.current.x;
@@ -190,6 +231,67 @@ export function TechnicianController({
 
     const inX = rgt - lft;
     const inZ = fwd - bk;
+    /* ── Intentional roof-to-ladder descent (S or W-toward-hatch near hatch) ─
+       Snap into the shaft when either:
+         • the player presses S (back) while near the hatch, OR
+         • the player presses W (forward) while near the hatch AND their camera
+           is pointing toward it (dot-product of camera-XZ-forward vs player→hatch
+           is positive — i.e. W would walk them into the shaft).
+       In both cases we place them at LADDER_ROOF_ENTRY (shaft centre, just below
+       the lip) so the ladder-climb loop on the next frame takes control cleanly.
+
+       ascentLockRef prevents descent from triggering the instant the player
+       pops out the top — they must step away from the hatch first. The lock
+       clears once they're more than 2 m from the shaft centre. */
+    if (ascentLockRef.current && onRoofRef.current) {
+      const hatchCxL = (27.35 + 28.65) / 2;
+      const hatchCzL = (-32.15 + -30.05) / 2;
+      const dxL = x - hatchCxL;
+      const dzL = z - hatchCzL;
+      if (dxL * dxL + dzL * dzL > 2.0 * 2.0) ascentLockRef.current = false;
+    }
+
+    if (
+      !ascentLockRef.current &&
+      onRoofRef.current &&
+      y >= ROOF_WALK_Y - 0.12 &&
+      !inLadderVolume(x, z) &&
+      nearLadderHatch(x, z)
+    ) {
+      const hatchCx = (27.35 + 28.65) / 2;
+      const hatchCz = (-32.15 + -30.05) / 2;
+
+      const camFwd = new THREE.Vector3();
+      camera.getWorldDirection(camFwd);
+      camFwd.y = 0;
+      camFwd.normalize();
+
+      /* Vector from player feet to hatch centre (XZ only) */
+      const toHatchX = hatchCx - x;
+      const toHatchZ = hatchCz - z;
+      const toHatchLen = Math.hypot(toHatchX, toHatchZ);
+      const facingHatch =
+        toHatchLen > 0.01 &&
+        (camFwd.x * toHatchX + camFwd.z * toHatchZ) / toHatchLen > 0.45; // ~63° cone
+
+      const wantDescend = !!bk || (!!fwd && facingHatch);
+
+      if (wantDescend) {
+        posRef.current.set(LADDER_ROOF_ENTRY[0], LADDER_ROOF_ENTRY[1], LADDER_ROOF_ENTRY[2]);
+        onRoofRef.current = false;
+        yVelRef.current = 0;
+        /* Latch: if W triggered this descent, suppress climbUp for this descent
+           so the shaft loop doesn't immediately bounce the player back out. */
+        if (!!fwd && facingHatch) descendingRef.current = true;
+        camera.position.set(
+          LADDER_ROOF_ENTRY[0],
+          LADDER_ROOF_ENTRY[1] + EYE_HEIGHT,
+          LADDER_ROOF_ENTRY[2],
+        );
+        return;
+      }
+    }
+
     /* Step from rooftop deck into open shaft (hatch) — before ladder solve */
     if (
       onRoofRef.current &&
@@ -203,24 +305,50 @@ export function TechnicianController({
       posRef.current.y = y;
     }
 
-    const inShaft = inLadderVolume(x, z) && y < ROOF_WALK_Y + 0.42;
+    /* ── Ground-floor ladder entry ────────────────────────────────────────
+       The south face of the shaft is now a solid AABB so the player bumps
+       into the ladder rather than walking through it.  When W is pressed
+       while standing close to that face and horizontally aligned with the
+       opening, snap the player to the shaft centre and lift y just above
+       the floor endpoint threshold so inShaft activates this frame. */
+    if (
+      !onRoofRef.current &&
+      onGroundRef.current &&
+      !!fwd &&
+      nearLadderBase(x, z)
+    ) {
+      posRef.current.set(LADDER_FLOOR_ENTRY[0], LADDER_FLOOR_ENTRY[1], LADDER_FLOOR_ENTRY[2]);
+      y = LADDER_FLOOR_ENTRY[1];
+      onGroundRef.current = false;
+      yVelRef.current = 0;
+    }
+
+    /* inShaft: true only while mid-ladder — never at the endpoints, so the
+       player can walk freely the moment they reach the floor or the roof exit.
+       At the floor: teleport already moves XZ clear, so inLadderVolume is
+       already false; this guard is a belt-and-suspenders safety net.
+       At the roof: the shaft block is treated as a wall by volumeBlockRoof, so
+       the player can't walk back in; shaft mode must not re-engage here either. */
+    const atEndpoint = y <= MAIN_FLOOR_Y + 0.05 || y >= ROOF_WALK_Y - 0.08;
+    const inShaft = inLadderVolume(x, z) && y < ROOF_WALK_Y + 0.42 && !atEndpoint;
 
     /* ─── Ladder climb ──────────────────────────────────────────────────────
-       Space (or W) climbs UP, S climbs DOWN. With no input the technician
-       slides down the ladder at a slow controlled rate — this is how the
-       roof-hatch descent feels natural after walking onto the open hatch
-       (the player would otherwise be holding W "forward" and shoot back up
-       through the hatch). The auto-pop-out at the top only triggers while
-       the player is actively climbing, so descents never bounce.
+       Space (or W) climbs UP, S climbs DOWN — both at SPRINT_SPEED.
+       descendingRef suppresses W-as-climbUp for the duration of a W-initiated
+       descent so the player doesn't instantly pop back out through the hatch.
+       The latch clears as soon as W is released. Idle (no input) slides down
+       at a gentle 45 % of SPRINT_SPEED so hands-off descents feel controlled.
     ─────────────────────────────────────────────────────────────────────── */
     if (inShaft) {
       yVelRef.current = 0;
       let climb = 0;
-      const climbUp = !!(k[' '] || k['spacebar'] || fwd);
+      /* Clear the descend-latch as soon as W is released */
+      if (!fwd) descendingRef.current = false;
+      const climbUp = !descendingRef.current && !!(k[' '] || k['spacebar'] || fwd);
       const climbDown = !!bk;
-      if (climbUp && !climbDown) climb = CLIMB_SPEED;
-      else if (climbDown && !climbUp) climb = -CLIMB_SPEED;
-      else climb = -CLIMB_SPEED * 0.45; /* idle = controlled slide-down */
+      if (climbUp && !climbDown) climb = SPRINT_SPEED;
+      else if (climbDown && !climbUp) climb = -SPRINT_SPEED;
+      else climb = -SPRINT_SPEED * 0.45; /* idle = controlled slide-down */
       y += climb * delta;
       y = THREE.MathUtils.clamp(y, MAIN_FLOOR_Y, ROOF_WALK_Y + 0.01);
 
@@ -229,10 +357,20 @@ export function TechnicianController({
         onRoofRef.current = true;
         yVelRef.current = 0;
         onGroundRef.current = true;
+        ascentLockRef.current = true; /* block descent until player steps away */
       } else if (y <= MAIN_FLOOR_Y + 0.02) {
-        y = MAIN_FLOOR_Y;
+        /* Teleport XZ clear of the shaft so inLadderVolume is false next frame
+           and the player can walk freely without re-engaging the climb loop. */
+        posRef.current.set(LADDER_FLOOR_EXIT[0], LADDER_FLOOR_EXIT[1], LADDER_FLOOR_EXIT[2]);
         onRoofRef.current = false;
         onGroundRef.current = true;
+        descendingRef.current = false;
+        camera.position.set(
+          LADDER_FLOOR_EXIT[0],
+          LADDER_FLOOR_EXIT[1] + EYE_HEIGHT,
+          LADDER_FLOOR_EXIT[2],
+        );
+        return;
       } else {
         onGroundRef.current = false;
       }

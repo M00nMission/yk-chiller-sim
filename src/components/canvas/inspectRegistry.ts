@@ -104,11 +104,52 @@ const ENTRIES: RegistryEntry[] = [
   {
     pattern: 'electrical:DS-AHU',
     spec: {
-      tag: 'DS-AHU',
-      service: 'AHU/RTU lockable disconnect',
-      spec: 'NEMA 4X (rooftop), fused, 480 V / 3Φ',
-      installNote: 'Mounted on the AHU casing per NEC 430 within sight of the supply-fan motor.',
+      tag: 'DS-AHU-1',
+      service: 'AHU/RTU lockable fused safety switch',
+      spec: 'NEMA 3R outdoor, side-operated handle, 480 V / 3Φ / 100 A FUSED, lockout staple for OSHA 1910.147 LOTO',
+      installNote: 'Mounted on the −Z (back) face of the AHU fan section between the two VFDs, within sight of the supply-fan motors per NEC 430.102. Padlock-OFF the handle and verify zero energy before removing the belt guard or accessing the fan section.',
       pidRef: 'electrical_system: Lockable disconnects at chiller, CDWP, CHWP, cooling tower fan, and AHU/RTU',
+    },
+  },
+  // ── AHU internal components ──────────────────────────────────────────────
+  {
+    pattern: 'ahu:FILT-AHU',
+    spec: {
+      tag: 'FILT-AHU-1',
+      service: 'AHU final-filter bank (MERV 13 pleated cartridges)',
+      spec: '4 rows × 8 cols of 24 × 24 × 12 in. MERV 13 pleated panel filters, kraft-board frame, aluminum-edge pleats, slide-in steel rack with spring-clip retainers',
+      installNote: 'Slide cartridges in from the +Z access door; spring clips press each cartridge against the upstream sealing face. Replace at +1.0 in. w.c. across the bank (verify with the door-mounted Magnehelic DP gauge). Differential-pressure transmitter taps on the rack signal the BMS to alarm dirty-filter at the same setpoint.',
+      pidRef: 'air_handling_unit: Pre-filter and final-filter sections with access doors and DP gauge',
+    },
+  },
+  {
+    pattern: 'ahu:COIL-AHU',
+    spec: {
+      tag: 'COIL-AHU-1',
+      service: 'AHU chilled-water cooling coil (Cu tubes / Al fins)',
+      spec: '8-row deep slab, 5/8" copper tubes on 1.5" × 1.25" stagger, 12 fpi corrugated aluminum fins, vertical supply/return copper headers with 180° hairpin returns on the opposite end, galvanized condensate drain pan with P-trapped 2" drain stub, ASME nameplate on supply end',
+      installNote: 'CHWS enters the bottom header, leaves out the top — counter-flow against the air stream. Auto air vent at the top header crown (AAV-AHU-SUP) purges entrained air. Drain pan slope >1/8" per ft toward the trap; trap depth ≥ 2× upstream fan static.',
+      pidRef: 'air_handling_unit: Chilled-water cooling coil section with sight-glass access doors',
+    },
+  },
+  {
+    pattern: 'ahu:BLW-AHU',
+    spec: {
+      tag: 'BLW-AHU-1',
+      service: 'AHU supply blower — DWDI housed centrifugal',
+      spec: 'Belt-drive double-width / dual-inlet centrifugal fan, ~36" wheel, forward-curved, ~760 RPM design, TEFC 60 HP / 480 V / 3Φ induction motor on slide-rail base, V-belt drive (4 × B-section belts), OSHA-yellow expanded-metal belt guard, neoprene-pad spring isolators (4) below base',
+      installNote: 'Two units per AHU arranged across the cabinet width. Inlet bell-mouths face the cross-cabinet plenum; discharge collar exits +Y up into the discharge plenum, which then drops through the curb into the supply-air ductwork below. Belt tension: 1/64" deflection per inch of span. Inspect bearings + belts quarterly.',
+      pidRef: 'air_handling_unit: Draw-through fan-array section with access doors',
+    },
+  },
+  {
+    pattern: 'ahu:OAD-AHU',
+    spec: {
+      tag: 'OAD-AHU-1',
+      service: 'AHU outside-air modulating damper',
+      spec: 'Aluminum extruded parallel-blade low-leak damper (≤8 cfm/ft² @ 1.0 in. w.c.), EPDM blade-edge seals, jamb seals, end-mounted Belimo AF24-MFT modulating actuator (24 VAC, 2-10 V control signal, 0–90° spring-return-to-close on power loss), bird-screen grille on OA face',
+      installNote: 'Set immediately downstream of the OA hood louvers. Modulates between minimum-OA position (≈25%) and free-cooling position (≈100%) under BMS economizer logic; closes fully on shutdown to prevent freeze damage at the coil.',
+      pidRef: 'air_handling_unit: Outside-air mixing box with modulating damper',
     },
   },
   {
