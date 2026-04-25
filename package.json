@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "dev:hmi": "vite --config vite.hmi.config.ts",
-    "dev:all": "concurrently --kill-others-on-fail --names \"SIM,HMI\" --prefix-colors \"cyan,magenta\" \"npm:dev\" \"npm:dev:hmi\"",
+    "dev:abb": "vite --config vite.abb.config.ts",
+    "dev:all": "concurrently --kill-others-on-fail --names \"SIM,HMI,ABB\" --prefix-colors \"cyan,magenta,yellow\" \"npm:dev\" \"npm:dev:hmi\" \"npm:dev:abb\"",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
