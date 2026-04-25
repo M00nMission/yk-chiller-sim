@@ -18,7 +18,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 const LOGINS = ['View', 'Operator', 'Service'] as const;
 const MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-type PageKey =
+export type PageKey =
   | 'home'
   | 'evaporator'
   | 'condenser'
@@ -870,8 +870,20 @@ const SCREENS: Record<PageKey, ScreenDef> = {
   },
 };
 
-export function HMIPanel() {
+interface HMIPanelProps {
+  /** Called whenever the active screen changes (e.g. for parent comparison views). */
+  onPageChange?: (page: PageKey) => void;
+}
+
+export function HMIPanel({ onPageChange }: HMIPanelProps = {}) {
   const [page, setPage] = useState<PageKey>('home');
+
+  useEffect(() => {
+    onPageChange?.(page);
+    // onPageChange identity is intentionally excluded — we only want to fire on
+    // actual page changes, not on parent re-renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
   const [accessIdx, setAccessIdx] = useState(2);
   const [modal, setModal] = useState<{ title: string; body: string } | null>(null);
   const [dt, setDt] = useState({ date: '--', time: '--' });

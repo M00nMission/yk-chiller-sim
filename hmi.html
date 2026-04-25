@@ -4,27 +4,14 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>York OptiView HMI — Standalone</title>
+    <title>York OptiView — Reference vs. Simulation</title>
     <style>
-      html,
-      body,
-      #hmi-root {
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body, #hmi-root {
+        width: 100%;
         height: 100%;
-        margin: 0;
-        padding: 0;
-        background: #000;
+        background: #070707;
         overflow: hidden;
-      }
-      body {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      /* Centered, fixed-aspect frame (matches the reference screenshot 4:3-ish).
-         Letterbox bars are pure black for an authentic CRT look. */
-      #hmi-root {
-        width: min(100vw, calc(100vh * (884 / 668)));
-        height: min(100vh, calc(100vw * (668 / 884)));
       }
     </style>
   </head>
