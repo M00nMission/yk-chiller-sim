@@ -71,74 +71,117 @@ const HISTORY_ROWS = [
 
 const HMI_CSS = `
 .hmi-root,.hmi-root *{box-sizing:border-box;margin:0;padding:0}
-.hmi-root{width:100%;height:100%;background:#b59a6e;font-family:'Arial',sans-serif;border:3px solid #444;display:flex;flex-direction:column;overflow:hidden;color:#fff;position:relative}
+.hmi-root{width:100%;height:100%;background:#b59a6e;font-family:'Arial',sans-serif;border:0;display:flex;flex-direction:column;overflow:hidden;color:#fff;position:relative;container-type:size}
 
 /* ── TOP BAR ── */
-.hmi-root .topbar{background:#000;display:flex;min-height:84px;border-bottom:2px solid #1a1a1a;position:relative;z-index:10}
-.hmi-root .tb-left{flex:1;padding:6px 12px 14px;display:flex;flex-direction:column;justify-content:space-between;border-right:2px solid #2a2a2a;position:relative;background:#1a1408;min-width:0}
-.hmi-root .lbl-status,.hmi-root .lbl-details{color:#7a7060;font-size:10px;letter-spacing:2.5px;font-weight:bold;font-family:'Arial',sans-serif;text-transform:uppercase}
-.hmi-root .lbl-details{margin-top:4px}
-.hmi-root .run-txt{color:#00ff00;font-size:18px;font-weight:bold;letter-spacing:3px;text-shadow:0 0 8px #00aa00,0 0 2px #00ff00;margin-top:1px;font-family:'Arial Black','Arial',sans-serif}
-.hmi-root .mode-txt{color:#00ff00;font-size:14px;font-weight:bold;letter-spacing:2px;text-shadow:0 0 6px #00aa00,0 0 2px #00ff00;margin-top:1px;font-family:'Arial Black','Arial',sans-serif}
-.hmi-root .scr-tab{position:absolute;left:14px;bottom:-12px;background:#b59a6e;color:#1a1408;font-size:10px;font-weight:bold;letter-spacing:2px;padding:3px 22px 4px;border:2px solid #555;border-top:none;clip-path:polygon(8px 0,calc(100% - 8px) 0,100% 100%,0 100%);z-index:6;font-family:'Arial Black','Arial',sans-serif;white-space:nowrap}
-.hmi-root .tb-mid{display:flex;align-items:stretch;background:#000}
-.hmi-root .dt-cell{display:flex;flex-direction:column;border-right:2px solid #2a2a2a;min-width:108px}
-.hmi-root .dt-lbl{background:#1a1408;color:#988064;font-size:9px;letter-spacing:1.5px;text-transform:uppercase;font-weight:bold;padding:3px 8px 2px;text-align:center;font-family:'Arial',sans-serif}
-.hmi-root .dt-val{flex:1;background:#fff;color:#1a1408;font-size:14px;font-weight:bold;padding:6px 10px;text-align:center;display:flex;align-items:center;justify-content:center;font-family:'Arial',sans-serif;border-top:1px solid #444}
-.hmi-root .ctrl-cell{display:flex;flex-direction:column;border-right:2px solid #2a2a2a;min-width:108px}
-.hmi-root .ctrl-lbl{background:#1a1408;color:#988064;font-size:9px;letter-spacing:1.2px;text-transform:uppercase;font-weight:bold;padding:2px 6px;text-align:center;font-family:'Arial',sans-serif}
-.hmi-root .ctrl-val{background:#fff;color:#1a1408;font-size:12px;font-weight:bold;padding:3px 6px;text-align:center;font-family:'Arial',sans-serif;border-top:1px solid #444;flex:1;display:flex;align-items:center;justify-content:center}
-.hmi-root .tb-right{padding:6px 0 6px 18px;display:flex;align-items:center;background:#000}
+.hmi-root .topbar{height:68px;background:#000;display:flex;border-bottom:1px solid #202020;position:relative;z-index:10;overflow:visible}
+.hmi-root .tb-left{flex:1;padding:0;display:flex;flex-direction:column;justify-content:flex-start;border-right:2px solid #767676;position:relative;background:#020202;min-width:0;overflow:visible}
+.hmi-root .lbl-status,.hmi-root .lbl-details{height:9px;color:#090909;background:#d6d6d6;font-size:8px;line-height:9px;letter-spacing:1.1px;font-weight:900;font-family:'Arial Black','Arial',sans-serif;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 0 rgba(255,255,255,0.45);padding-left:4px}
+.hmi-root .lbl-details{margin-top:0}
+.hmi-root .run-txt{height:25px;color:#29ff1a;background:#020202;font-size:17px;font-weight:900;letter-spacing:1px;text-shadow:1px 1px 1px #003600,0 0 4px #00a000;margin-top:0;font-family:'Arial Black','Arial',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:25px;padding-left:4px;border-bottom:1px solid #7b7b7b}
+.hmi-root .mode-txt{height:25px;color:#29ff1a;background:#020202;font-size:16px;font-weight:900;letter-spacing:0.7px;text-shadow:1px 1px 1px #003600,0 0 4px #00a000;margin-top:0;font-family:'Arial Black','Arial',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:25px;padding-left:4px}
+.hmi-root .scr-tab{position:absolute;left:20px;bottom:-16px;height:16px;background:#f0f0f0;color:#111;font-size:10px;font-weight:900;letter-spacing:4px;padding:1px 18px 0;border:2px solid #555;border-top:none;clip-path:polygon(0 0,100% 0,calc(100% - 13px) 100%,13px 100%);z-index:6;font-family:'Arial Black','Arial',sans-serif;white-space:nowrap;text-shadow:0 1px 0 #fff;line-height:12px}
+.hmi-root .tb-mid{display:flex;align-items:flex-start;background:#000;flex-shrink:0}
+.hmi-root .dt-cell{height:35px;display:flex;flex-direction:column;border-right:2px solid #767676;min-width:112px;flex-shrink:0;background:#000}
+.hmi-root .dt-cell:nth-child(2){min-width:88px}
+.hmi-root .dt-lbl{height:9px;background:#d6d6d6;color:#090909;font-size:8px;line-height:9px;letter-spacing:1px;text-transform:uppercase;font-weight:900;padding:0 5px;text-align:left;font-family:'Arial Black','Arial',sans-serif;white-space:nowrap;text-shadow:0 1px 0 rgba(255,255,255,0.45)}
+.hmi-root .dt-val{height:26px;background:#fff;color:#1a1408;font-size:16px;font-weight:900;padding:0 8px;text-align:center;display:flex;align-items:center;justify-content:center;font-family:'Arial Black','Arial',sans-serif;border-top:2px solid #767676;white-space:nowrap}
+.hmi-root .ctrl-cell{height:68px;display:flex;flex-direction:column;border-right:2px solid #767676;min-width:118px;flex-shrink:0;background:#000}
+.hmi-root .ctrl-lbl{height:9px;background:#d6d6d6;color:#090909;font-size:8px;line-height:9px;letter-spacing:0.7px;text-transform:uppercase;font-weight:900;padding:0 3px;text-align:center;font-family:'Arial Black','Arial',sans-serif;white-space:nowrap;text-shadow:0 1px 0 rgba(255,255,255,0.45)}
+.hmi-root .ctrl-val{height:25px;background:#fff;color:#1a1408;font-size:15px;font-weight:900;padding:0 4px;text-align:center;font-family:'Arial Black','Arial',sans-serif;border-top:2px solid #767676;display:flex;align-items:center;justify-content:center;white-space:nowrap}
+.hmi-root .tb-right{padding:6px 0 0 0;display:flex;align-items:flex-start;background:#000;flex-shrink:0}
 
-/* ── ARROW BUTTONS — york blue, chevrons pointing INTO the screen ── */
-.hmi-root .abtn{display:inline-flex;align-items:center;justify-content:center;position:relative;background:linear-gradient(180deg,#2470c8 0%,#1a5fb4 45%,#0d3d80 100%);border:2px solid #6aa0ec;border-left:none;color:#fff;font-family:'Arial Black','Arial',sans-serif;font-weight:900;font-size:13px;letter-spacing:0.4px;padding:9px 14px 9px 10px;cursor:pointer;min-width:104px;text-align:center;line-height:1.2;text-shadow:0 1px 2px rgba(0,0,40,0.7);box-shadow:inset 1px 0 0 rgba(255,255,255,0.2),inset 0 -2px 0 rgba(0,0,40,0.3)}
-.hmi-root .abtn::before{content:'';position:absolute;left:-20px;top:-2px;bottom:-2px;width:22px;background:linear-gradient(180deg,#2470c8 0%,#1a5fb4 45%,#0d3d80 100%);border-top:2px solid #6aa0ec;border-bottom:2px solid #6aa0ec;border-left:2px solid #6aa0ec;clip-path:polygon(100% 0,0 50%,100% 100%);z-index:1}
-.hmi-root .abtn:hover{background:linear-gradient(180deg,#2e7fdc 0%,#2470c8 45%,#1248a0 100%)}
-.hmi-root .abtn:hover::before{background:linear-gradient(180deg,#2e7fdc 0%,#2470c8 45%,#1248a0 100%)}
-.hmi-root .abtn.on{background:linear-gradient(180deg,#1248a0 0%,#0d3d80 45%,#08285a 100%);border-color:#88aaff}
-.hmi-root .abtn.on::before{background:linear-gradient(180deg,#1248a0 0%,#0d3d80 45%,#08285a 100%);border-color:#88aaff}
+/* Home screen uses reference coordinates expressed in container units so it
+   scales down inside the standalone comparison wrapper. */
+.hmi-root.hmi-home .topbar{height:10.18cqh;min-height:10.18cqh;background:transparent;border-bottom:none}
+.hmi-root.hmi-home .tb-left{height:10.18cqh;border-right:none;background:#000}
+.hmi-root.hmi-home .tb-left::after{content:'';position:absolute;right:0;top:0;width:1px;height:5.24cqh;background:#a8a8a8}
+.hmi-root.hmi-home .lbl-status,.hmi-root.hmi-home .lbl-details{height:1.2cqh;background:#d7d7d7;color:#050505;font-size:0.9cqw;line-height:1.2cqh;letter-spacing:0.11cqw;padding-left:0.34cqw;font-family:'Arial Black','Arial Narrow','Arial',sans-serif;font-weight:900;text-shadow:none}
+.hmi-root.hmi-home .run-txt{height:3.89cqh;background:#000;color:#21ff10;font-family:'Arial Black','Arial Narrow','Arial',sans-serif;font-size:1.92cqw;font-weight:900;line-height:3.89cqh;letter-spacing:0.09cqw;padding-left:0.34cqw;border-top:1px solid #a8a8a8;border-bottom:1px solid #a8a8a8;text-shadow:0.11cqw 0.15cqh 0 #003000,0 0 0.3cqh #00a000}
+.hmi-root.hmi-home .mode-txt{height:3.89cqh;background:#000;color:#21ff10;font-family:'Arial Black','Arial Narrow','Arial',sans-serif;font-size:1.81cqw;font-weight:900;line-height:3.89cqh;letter-spacing:0.06cqw;padding-left:0.34cqw;border-top:1px solid #a8a8a8;text-shadow:0.11cqw 0.15cqh 0 #003000,0 0 0.3cqh #00a000}
+.hmi-root.hmi-home .scr-tab{left:2.38cqw;bottom:-2.4cqh;height:2.4cqh;min-width:16.18cqw;background:#f2f2f2;color:#111;font-family:'Arial Black','Arial Narrow','Arial',sans-serif;font-size:1.13cqw;font-weight:900;line-height:1.8cqh;letter-spacing:0.45cqw;padding:0.15cqh 1.7cqw 0;border:0.23cqw solid #555;border-top:none;clip-path:polygon(0 0,100% 0,calc(100% - 1.58cqw) 100%,1.58cqw 100%)}
+.hmi-root.hmi-home .tb-mid{height:10.18cqh;background:#000;position:relative}
+.hmi-root.hmi-home .tb-mid::after{content:'';position:absolute;left:0;right:13.24cqw;top:5.09cqh;height:1.2cqh;background:#d7d7d7;border-top:1px solid #a8a8a8;border-bottom:1px solid #a8a8a8;pointer-events:none}
+.hmi-root.hmi-home .dt-cell{width:14.14cqw;min-width:14.14cqw;height:5.24cqh;border-right:1px solid #a8a8a8;border-bottom:1px solid #a8a8a8;background:#000}
+.hmi-root.hmi-home .dt-cell:nth-child(2){width:9.95cqw;min-width:9.95cqw}
+.hmi-root.hmi-home .dt-lbl{height:1.2cqh;background:#d7d7d7;color:#050505;font-size:0.9cqw;line-height:1.2cqh;letter-spacing:0.11cqw;padding:0 0.57cqw;text-align:left;font-family:'Arial Black','Arial Narrow','Arial',sans-serif;font-weight:900;text-shadow:none}
+.hmi-root.hmi-home .dt-val{height:4.04cqh;background:#000;color:#fff;font-size:1.81cqw;line-height:4.04cqh;font-family:'Arial Black','Arial Narrow','Arial',sans-serif;font-weight:900;border-top:1px solid #a8a8a8;padding:0 0.68cqw;text-shadow:0.11cqw 0.15cqh 0 #000}
+.hmi-root.hmi-home .ctrl-cell{width:13.24cqw;min-width:13.24cqw;height:10.18cqh;border-right:1px solid #a8a8a8;background:#000}
+.hmi-root.hmi-home .ctrl-lbl{height:1.2cqh;background:#d7d7d7;color:#050505;font-size:0.9cqw;line-height:1.2cqh;letter-spacing:0.06cqw;padding:0 0.23cqw;text-align:center;font-family:'Arial Black','Arial Narrow','Arial',sans-serif;font-weight:900;text-shadow:none}
+.hmi-root.hmi-home .ctrl-val{height:3.89cqh;background:#000;color:#fff;font-size:1.7cqw;line-height:3.89cqh;font-family:'Arial Black','Arial Narrow','Arial',sans-serif;font-weight:900;border-top:1px solid #a8a8a8;padding:0 0.34cqw;text-shadow:0.11cqw 0.15cqh 0 #000}
+.hmi-root.hmi-home .ctrl-lbl + .ctrl-val + .ctrl-lbl{border-top:1px solid #a8a8a8}
+.hmi-root.hmi-home .tb-right{width:14.71cqw;height:10.18cqh;padding:1.05cqh 0 0 0;background:#91724a;align-items:flex-start}
+.hmi-root.hmi-home .tb-right .abtn{width:14.71cqw;min-width:14.71cqw;height:6.29cqh;min-height:6.29cqh;font-size:2.04cqw;padding:0 3.28cqw 0 1.36cqw}
+.hmi-root.hmi-home .main{position:absolute;left:0;right:0;top:10.18cqh;bottom:0;display:block;overflow:visible;background:transparent}
+.hmi-root.hmi-home .center{position:absolute;left:0;top:0;width:100%;height:89.82cqh;display:block;background:transparent}
+.hmi-root.hmi-home .home-stage{position:absolute;left:0;top:0;width:100%;height:100%;display:block;background:#b59a6e}
+.hmi-root.hmi-home .rnav{position:absolute;right:0;top:4.34cqh;width:16.86cqw;height:83.23cqh;margin:0;padding:0;background:transparent;display:flex;flex-direction:column;justify-content:space-between;align-items:flex-end}
+.hmi-root.hmi-home .rbtn{width:16.86cqw;min-width:16.86cqw;height:5.99cqh;min-height:5.99cqh;font-size:1.7cqw;padding:0 2.94cqw 0 1.13cqw}
+.hmi-root.hmi-home .botbar{position:absolute;left:0.34cqw;bottom:0;width:42.76cqw;height:11.53cqh;min-height:11.53cqh;padding:0;background:transparent;display:flex;align-items:flex-end}
+.hmi-root.hmi-home .botbar .bb-left{display:flex;gap:1.13cqw;align-items:flex-end;flex-wrap:nowrap}
+.hmi-root.hmi-home .abtn-up{width:13.46cqw;height:8.38cqh;min-width:13.46cqw;min-height:8.38cqh;padding:0 1.13cqw 2.54cqh;font-size:1.81cqw;clip-path:polygon(0 0,100% 0,100% calc(100% - 2.54cqh),62% calc(100% - 2.54cqh),50% 100%,38% calc(100% - 2.54cqh),0 calc(100% - 2.54cqh))}
+.hmi-root.hmi-home .abtn-up.tall{width:13.46cqw;height:11.53cqh;min-height:11.53cqh;padding:0 1.13cqw 2.54cqh}
+.hmi-root.hmi-home .bb-spacer,.hmi-root.hmi-home .alarmzone{display:none}
 
-/* Bottom-row buttons: chevron on the TOP pointing up into the page */
-.hmi-root .abtn-up{display:inline-flex;align-items:center;justify-content:center;position:relative;background:linear-gradient(90deg,#2470c8 0%,#1a5fb4 50%,#0d3d80 100%);border:2px solid #6aa0ec;border-top:none;color:#fff;font-family:'Arial Black','Arial',sans-serif;font-weight:900;font-size:13px;letter-spacing:0.3px;padding:8px 14px;cursor:pointer;min-width:80px;text-align:center;line-height:1.05;text-shadow:0 1px 2px rgba(0,0,40,0.7);box-shadow:inset 0 -1px 0 rgba(255,255,255,0.18),inset -2px 0 0 rgba(0,0,40,0.3)}
-.hmi-root .abtn-up::before{content:'';position:absolute;top:-20px;left:-2px;right:-2px;height:22px;background:linear-gradient(90deg,#2470c8 0%,#1a5fb4 50%,#0d3d80 100%);border-left:2px solid #6aa0ec;border-right:2px solid #6aa0ec;border-top:2px solid #6aa0ec;clip-path:polygon(0 100%,50% 0,100% 100%);z-index:1}
-.hmi-root .abtn-up:hover{background:linear-gradient(90deg,#2e7fdc 0%,#2470c8 50%,#1248a0 100%)}
-.hmi-root .abtn-up:hover::before{background:linear-gradient(90deg,#2e7fdc 0%,#2470c8 50%,#1248a0 100%)}
-.hmi-root .abtn-up.tall{padding:6px 14px}
+/* ── ARROW BUTTONS — dark OptiView blue, right-pointing tabs ── */
+.hmi-root .abtn{display:inline-flex;align-items:center;justify-content:center;position:relative;background:linear-gradient(180deg,#1430c8 0%,#0b21a6 48%,#061178 100%);clip-path:polygon(0 0,calc(100% - 22px) 0,100% 50%,calc(100% - 22px) 100%,0 100%);border:0;color:#fff;font-family:'Arial Black','Arial',sans-serif;font-weight:900;font-size:16px;letter-spacing:0.1px;padding:0 28px 0 13px;cursor:pointer;min-width:130px;min-height:39px;text-align:center;line-height:1.05;text-shadow:1px 1px 1px #000,-1px -1px 0 rgba(255,255,255,0.25);box-shadow:inset 0 0 0 2px #2739cf,inset 0 2px 0 rgba(255,255,255,0.25),inset 0 -3px 0 rgba(0,0,0,0.45),3px 3px 0 rgba(0,0,0,0.5)}
+.hmi-root .abtn::before{content:none}
+.hmi-root .abtn:hover{background:linear-gradient(180deg,#1a3ee0 0%,#1029bd 48%,#081888 100%)}
+.hmi-root .abtn:hover::before{content:none}
+.hmi-root .abtn.on{background:linear-gradient(180deg,#1430c8 0%,#0b21a6 48%,#061178 100%);box-shadow:inset 0 0 0 2px #3144dc,inset 0 2px 0 rgba(255,255,255,0.28),inset 0 -3px 0 rgba(0,0,0,0.5),3px 3px 0 rgba(0,0,0,0.55)}
+.hmi-root .abtn.on::before{content:none}
+
+/* Bottom-row buttons: dark blue tabs with a downward centre notch */
+.hmi-root .abtn-up{display:inline-flex;align-items:center;justify-content:center;position:relative;background:linear-gradient(180deg,#1430c8 0%,#0b21a6 48%,#061178 100%);clip-path:polygon(0 0,100% 0,100% calc(100% - 17px),62% calc(100% - 17px),50% 100%,38% calc(100% - 17px),0 calc(100% - 17px));border:0;color:#fff;font-family:'Arial Black','Arial',sans-serif;font-weight:900;font-size:16px;letter-spacing:0;padding:0 12px 16px;cursor:pointer;width:120px;height:58px;text-align:center;line-height:1.05;text-shadow:1px 1px 1px #000,-1px -1px 0 rgba(255,255,255,0.25);box-shadow:inset 0 0 0 2px #2739cf,inset 0 2px 0 rgba(255,255,255,0.25),inset 0 -3px 0 rgba(0,0,0,0.45);filter:drop-shadow(3px 3px 0 rgba(0,0,0,0.55))}
+.hmi-root .abtn-up::before{content:none}
+.hmi-root .abtn-up:hover{background:linear-gradient(180deg,#1a3ee0 0%,#1029bd 48%,#081888 100%)}
+.hmi-root .abtn-up:hover::before{content:none}
+.hmi-root .abtn-up.tall{height:77px;padding:0 12px 17px}
 
 .hmi-root .rbadge{display:inline-block;background:#000;border:1.5px inset #555;color:#fff;font-family:'Arial Black','Arial',sans-serif;font-weight:900;font-size:11px;padding:2px 8px;margin-left:6px;letter-spacing:0.5px;min-width:42px;text-align:center;text-shadow:none;box-shadow:inset 0 1px 2px rgba(0,0,0,0.7)}
 .hmi-root .rled{display:inline-block;width:9px;height:9px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ff8888,#cc1111 55%,#440000);box-shadow:0 0 5px rgba(255,40,40,0.8),inset 0 -1px 1px rgba(0,0,0,0.4);border:1px solid #220000;margin-left:6px;vertical-align:middle}
 
 /* ── MAIN LAYOUT ── */
-.hmi-root .main{flex:1;display:flex;overflow:hidden;background:#b59a6e;min-height:0}
+.hmi-root .main{flex:1;display:flex;overflow:visible;background:#b59a6e;min-height:0;position:relative}
 .hmi-root .center{flex:1;display:flex;flex-direction:column;padding:0;background:#b59a6e;position:relative;min-width:0;min-height:0}
 
 /* Right nav — page-driven blue arrow buttons. */
-.hmi-root .rnav{width:158px;background:#b59a6e;display:flex;flex-direction:column;padding:14px 0;justify-content:space-between;align-items:flex-end;flex-shrink:0}
-.hmi-root .rbtn{display:flex;align-items:center;justify-content:center;position:relative;background:linear-gradient(180deg,#2470c8 0%,#1a5fb4 45%,#0d3d80 100%);border:2px solid #6aa0ec;border-left:none;color:#fff;font-family:'Arial Black','Arial',sans-serif;font-weight:900;font-size:12px;letter-spacing:0.3px;padding:6px 8px 6px 4px;cursor:pointer;text-align:center;line-height:1.05;width:148px;min-height:34px;text-shadow:0 1px 2px rgba(0,0,40,0.7);box-shadow:inset 1px 0 0 rgba(255,255,255,0.2),inset 0 -2px 0 rgba(0,0,40,0.3)}
-.hmi-root .rbtn::before{content:'';position:absolute;left:-20px;top:-2px;bottom:-2px;width:22px;background:linear-gradient(180deg,#2470c8 0%,#1a5fb4 45%,#0d3d80 100%);border-top:2px solid #6aa0ec;border-bottom:2px solid #6aa0ec;border-left:2px solid #6aa0ec;clip-path:polygon(100% 0,0 50%,100% 100%);z-index:1}
-.hmi-root .rbtn:hover{background:linear-gradient(180deg,#2e7fdc 0%,#2470c8 45%,#1248a0 100%)}
-.hmi-root .rbtn:hover::before{background:linear-gradient(180deg,#2e7fdc 0%,#2470c8 45%,#1248a0 100%)}
-.hmi-root .rbtn.on{background:linear-gradient(180deg,#1248a0 0%,#0d3d80 45%,#08285a 100%);border-color:#88aaff}
-.hmi-root .rbtn.on::before{background:linear-gradient(180deg,#1248a0 0%,#0d3d80 45%,#08285a 100%);border-color:#88aaff}
-.hmi-root .rbtn .rbtn-lbl{flex:1;padding:0 2px}
+.hmi-root .rnav{width:150px;height:calc(100% + 77px);margin-bottom:-77px;background:transparent;display:flex;flex-direction:column;padding:28px 0 16px;justify-content:space-between;align-items:flex-end;flex-shrink:0;position:relative;z-index:8}
+.hmi-root .rbtn{display:flex;align-items:center;justify-content:center;position:relative;background:linear-gradient(180deg,#1430c8 0%,#0b21a6 48%,#061178 100%);clip-path:polygon(0 0,calc(100% - 24px) 0,100% 50%,calc(100% - 24px) 100%,0 100%);border:0;color:#fff;font-family:'Arial Black','Arial',sans-serif;font-weight:900;font-size:15px;letter-spacing:0;padding:0 26px 0 10px;cursor:pointer;text-align:center;line-height:1.05;width:150px;min-height:39px;text-shadow:1px 1px 1px #000,-1px -1px 0 rgba(255,255,255,0.25);box-shadow:inset 0 0 0 2px #2739cf,inset 0 2px 0 rgba(255,255,255,0.25),inset 0 -3px 0 rgba(0,0,0,0.45),3px 3px 0 rgba(0,0,0,0.5)}
+.hmi-root .rbtn::before{content:none}
+.hmi-root .rbtn:hover{background:linear-gradient(180deg,#1a3ee0 0%,#1029bd 48%,#081888 100%)}
+.hmi-root .rbtn:hover::before{content:none}
+.hmi-root .rbtn.on{background:linear-gradient(180deg,#1430c8 0%,#0b21a6 48%,#061178 100%);box-shadow:inset 0 0 0 2px #3144dc,inset 0 2px 0 rgba(255,255,255,0.28),inset 0 -3px 0 rgba(0,0,0,0.5),3px 3px 0 rgba(0,0,0,0.55)}
+.hmi-root .rbtn.on::before{content:none}
+.hmi-root .rbtn .rbtn-lbl{flex:1;padding:0 4px 0 0}
 
 /* ── HOME PAGE — overlay layout matching assets/york-optiview/york-optiview.png ── */
 .hmi-root .home-stage{flex:1;position:relative;overflow:hidden;background:#b59a6e}
 .hmi-root .home-stage canvas{position:absolute;inset:0;width:100%;height:100%}
-.hmi-root .home-meta{position:absolute;top:18px;left:18px;display:flex;flex-direction:column;gap:14px;z-index:5}
-.hmi-root .meta-row{display:flex;align-items:center;gap:10px;color:#fff;font-family:'Arial Black','Arial',sans-serif;font-size:14px;font-weight:900;letter-spacing:0.5px;text-shadow:1px 1px 2px rgba(0,0,0,0.85),-1px -1px 1px rgba(0,0,0,0.4),0 0 4px rgba(0,0,0,0.35)}
-.hmi-root .meta-val{background:#000;border:1.5px inset #555;color:#00ffaa;font-family:'Courier New',monospace;font-weight:bold;font-size:14px;padding:2px 12px;min-width:80px;text-align:right;letter-spacing:1px;box-shadow:inset 0 1px 2px rgba(0,0,0,0.8);text-shadow:0 0 4px rgba(0,255,170,0.4)}
-.hmi-root .led{width:14px;height:14px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ff8888,#dd2020 55%,#660000);box-shadow:0 0 8px rgba(255,40,40,0.85),inset 0 -1px 2px rgba(0,0,0,0.5),inset 0 1px 2px rgba(255,200,200,0.6);border:1px solid #110000;margin-left:2px;display:inline-block}
+.hmi-root .home-meta{position:absolute;inset:0;z-index:5;pointer-events:none}
+.hmi-root .meta-row{display:flex;align-items:center;justify-content:space-between;color:#fff;font-family:Arial,Helvetica,sans-serif;font-size:2.04cqw;font-weight:700;letter-spacing:0;text-shadow:0.18cqw 0.26cqh 0 #000,0.08cqw 0.12cqh 0.12cqh #000;line-height:1}
+.hmi-root .meta-row{position:absolute;left:2.26cqw;width:28.62cqw}
+.hmi-root .meta-row:nth-child(1){top:9.0%}
+.hmi-root .meta-row:nth-child(2){top:18.75%}
+.hmi-root .meta-row:nth-child(3){top:23.83%;left:9.95cqw;width:auto;justify-content:flex-start;gap:0.68cqw}
+.hmi-root .meta-val{background:#000;border:0.23cqw inset #5b5b5b;color:#fff;font-family:'Arial Black','Arial Narrow','Arial',sans-serif;font-weight:900;font-size:1.81cqw;padding:0 0.68cqw;width:10.07cqw;min-width:10.07cqw;height:3.74cqh;line-height:3.14cqh;text-align:right;letter-spacing:0;box-shadow:none;text-shadow:0.11cqw 0.15cqh 0 #000}
+.hmi-root .led{width:1.58cqw;height:2.1cqh;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ff8888,#dd2020 55%,#660000);box-shadow:0 0 1.2cqh rgba(255,40,40,0.85),inset 0 -0.15cqh 0.3cqh rgba(0,0,0,0.5),inset 0 0.15cqh 0.3cqh rgba(255,200,200,0.6);border:0.11cqw solid #110000;margin-left:0.23cqw;display:inline-block}
 
-.hmi-root .home-temps{position:absolute;left:0;right:0;bottom:14px;display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:auto auto;gap:14px 8px;padding:0 22px;z-index:5;align-items:end;justify-items:center}
-.hmi-root .tblock{display:flex;flex-direction:column;align-items:center;gap:3px}
-.hmi-root .tblock.heating{grid-column:2;grid-row:1}
-.hmi-root .tblock.chilled{grid-column:1;grid-row:2}
-.hmi-root .tblock.cond{grid-column:3;grid-row:2}
-.hmi-root .ttitle{color:#fff;font-family:'Arial Black','Arial',sans-serif;font-size:13px;font-weight:900;letter-spacing:0.3px;text-shadow:1px 1px 2px rgba(0,0,0,0.85),0 0 4px rgba(0,0,0,0.4);margin-bottom:3px;text-align:center;white-space:nowrap}
-.hmi-root .tline{display:flex;align-items:center;gap:10px;color:#fff;font-family:'Arial Black','Arial',sans-serif;font-size:13px;font-weight:900;text-shadow:1px 1px 2px rgba(0,0,0,0.8)}
-.hmi-root .tlabel{min-width:62px;text-align:right}
-.hmi-root .tval{background:#000;border:1.5px inset #555;color:#00ffaa;font-family:'Courier New',monospace;font-weight:bold;font-size:13px;padding:1px 12px;min-width:90px;text-align:right;letter-spacing:1px;box-shadow:inset 0 1px 2px rgba(0,0,0,0.8);text-shadow:0 0 4px rgba(0,255,170,0.4)}
+/* Home temperature blocks — three columns laid out so column widths are
+   equal regardless of label length (otherwise the long "Heating
+   Condenser Liquid Temperature" title pushes the right column off-screen).
+   minmax(0,1fr) allows columns to shrink below their intrinsic content
+   width; titles use overflow-safe sizing so they wrap onto two lines if
+   needed rather than overflowing horizontally. */
+.hmi-root .home-temps{position:absolute;inset:0;z-index:5;pointer-events:none}
+.hmi-root .tblock{position:absolute;display:flex;flex-direction:column;align-items:stretch;gap:5px;min-width:0}
+.hmi-root .tblock.heating{left:38.46%;top:52.67%;width:35.07%}
+.hmi-root .tblock.chilled{left:12.22%;top:69.5%;width:24.89%}
+.hmi-root .tblock.cond{left:47.51%;top:69.5%;width:26.02%}
+.hmi-root .ttitle{color:#0b0b0b;font-family:'Arial Black','Arial Narrow','Arial',sans-serif;font-size:2.04cqw;font-weight:900;letter-spacing:-0.09cqw;text-shadow:0.11cqw 0.15cqh 0 rgba(255,255,255,0.28);margin-bottom:0.6cqh;text-align:center;line-height:1;white-space:nowrap}
+.hmi-root .tline{display:flex;align-items:center;justify-content:flex-end;gap:1.09%;color:#0b0b0b;font-family:'Arial Black','Arial Narrow','Arial',sans-serif;font-size:2.04cqw;font-weight:900;letter-spacing:-0.09cqw;text-shadow:0.11cqw 0.15cqh 0 rgba(255,255,255,0.28);white-space:nowrap;line-height:1}
+.hmi-root .tlabel{min-width:11.97%;text-align:right}
+.hmi-root .tval{background:#000;border:0.23cqw inset #5b5b5b;color:#fff;font-family:'Arial Black','Arial Narrow','Arial',sans-serif;font-weight:900;font-size:1.81cqw;padding:0 0.57cqw;min-width:12.44cqw;height:3.59cqh;line-height:2.99cqh;text-align:right;letter-spacing:0;box-shadow:none;text-shadow:0.11cqw 0.15cqh 0 #000}
 
 /* ── PROGRAMMATIC DETAIL SCREENS — beige floor with data blocks ──
    Used by every non-home screen.  Rows of label + black-box / green-CRT
@@ -186,10 +229,12 @@ const HMI_CSS = `
 .hmi-root .evN{color:#00cc55}.hmi-root .evW{color:#ffaa00}.hmi-root .evF{color:#ff3333}
 
 /* ── BOTTOM BAR ── */
-.hmi-root .botbar{background:#b59a6e;border-top:none;display:flex;align-items:flex-end;padding:0 18px 0;gap:14px;min-height:54px;position:relative;z-index:7;flex-shrink:0}
-.hmi-root .botbar .bb-left{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap}
+.hmi-root .botbar{background:#b59a6e;border-top:none;display:flex;align-items:flex-end;padding:0 2px 0;gap:10px;min-height:77px;position:relative;z-index:7;flex-shrink:0}
+.hmi-root .botbar .bb-left{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
 .hmi-root .botbar .bb-spacer{flex:1}
-.hmi-root .alarmzone{position:absolute;left:50%;transform:translateX(-50%);top:6px;text-align:center;font-size:11px;font-weight:bold;letter-spacing:1px;font-family:'Arial Black','Arial',sans-serif;pointer-events:none}
+/* Alarm zone is anchored to the right of the bottom bar so it never
+   overlaps the leftmost command buttons (Print / Logout / Soft Shutdown). */
+.hmi-root .alarmzone{position:absolute;right:14px;bottom:6px;text-align:right;font-size:10px;font-weight:bold;letter-spacing:0.8px;font-family:'Arial Black','Arial',sans-serif;pointer-events:none}
 .hmi-root .alok{color:#0a4a14;text-shadow:0 1px 1px rgba(255,255,255,0.4)}
 .hmi-root .alwarn{color:#c01010;text-shadow:0 1px 1px rgba(255,255,255,0.4);animation:hmiBlink 0.8s step-end infinite}
 @keyframes hmiBlink{0%,100%{opacity:1}50%{opacity:0}}
@@ -280,19 +325,28 @@ const SCREENS: Record<PageKey, ScreenDef> = {
   home: {
     label: 'HOME SCREEN',
     kind: 'home',
+    /* Reference (assets/york-optiview/york-optiview.png) shows exactly
+       eight right-nav buttons on the Home screen.  Heat Recovery,
+       Refrigerant Level and Diagnostics live behind the detail screens
+       (Condenser → Heat Pump → Heat Recovery, etc.) — they don't appear
+       on Home.  Keep this list aligned with the reference screenshot. */
     rightNav: [
       { label: 'Evaporator', go: 'evaporator' },
       { label: 'Condenser', go: 'condenser' },
       { label: 'Compressor', go: 'compressor' },
       { label: 'Oil Sump', go: 'oilsump' },
       { label: 'Motor', go: 'motor' },
-      { label: ['Heat', 'Recovery'], go: 'heatRecovery' },
-      { label: ['Refrigerant', 'Level'], go: 'refrigerantLevel' },
-      { label: 'Diagnostics', go: 'diagnostics' },
       { label: 'Setpoints', go: 'setpoints' },
       { label: 'History', go: 'history' },
     ],
-    botBar: BOT_DEFAULT,
+    /* Home bottom bar in the reference is just three command buttons
+       (Print, Logout, Soft Shutdown) — History is reached via the right
+       nav, not duplicated on the bottom bar. */
+    botBar: [
+      { label: 'Print', cmd: 'print' },
+      { label: 'Logout', cmd: 'logout' },
+      { label: ['Soft', 'Shutdown'], cmd: 'softShutdown', tall: true },
+    ],
   },
 
   evaporator: {
@@ -951,11 +1005,11 @@ export function HMIPanel({ onPageChange }: HMIPanelProps = {}) {
 
     const shellGradient = (x: number, y: number, _w: number, h: number) => {
       const g = cx.createLinearGradient(x, y, x, y + h);
-      g.addColorStop(0, '#7ed05a');
-      g.addColorStop(0.22, '#46a838');
-      g.addColorStop(0.55, '#2c8a2c');
-      g.addColorStop(0.85, '#155215');
-      g.addColorStop(1, '#0a2e0a');
+      g.addColorStop(0, '#93ff73');
+      g.addColorStop(0.18, '#52dc58');
+      g.addColorStop(0.48, '#20a840');
+      g.addColorStop(0.78, '#0c6a24');
+      g.addColorStop(1, '#063816');
       return g;
     };
 
@@ -1276,25 +1330,26 @@ export function HMIPanel({ onPageChange }: HMIPanelProps = {}) {
       cx.clearRect(0, 0, W, H);
 
       const wallG = cx.createLinearGradient(0, 0, 0, H);
-      wallG.addColorStop(0, '#9a7f54');
-      wallG.addColorStop(0.42, '#b89c70');
-      wallG.addColorStop(0.55, '#c4a878');
-      wallG.addColorStop(1, '#d3b888');
+      wallG.addColorStop(0, '#91724a');
+      wallG.addColorStop(0.38, '#a8895b');
+      wallG.addColorStop(0.39, '#efe4c1');
+      wallG.addColorStop(0.62, '#e6d4a6');
+      wallG.addColorStop(1, '#d0b37d');
       cx.fillStyle = wallG;
       cx.fillRect(0, 0, W, H);
 
-      cx.fillStyle = 'rgba(80,55,25,0.15)';
-      cx.fillRect(0, H * 0.5, W, 1.5);
+      cx.fillStyle = 'rgba(80,55,25,0.18)';
+      cx.fillRect(0, H * 0.39, W, 1.5);
 
       cx.fillStyle = 'rgba(80,55,25,0.06)';
-      for (let i = 0; i < 22; i++) {
-        cx.fillRect(0, H * 0.55 + i * Math.max(4, (H * 0.45) / 22), W, 1);
+      for (let i = 0; i < 28; i++) {
+        cx.fillRect(0, H * 0.41 + i * Math.max(4, (H * 0.59) / 28), W, 1);
       }
 
-      const len = Math.min(W * 0.62, 480);
-      const rad = Math.min(H * 0.18, len * 0.2);
-      const cxn = W * 0.54;
-      const cyn = H * 0.5 + rad * 0.6;
+      const len = Math.min(W * 0.68, 505);
+      const rad = Math.min(H * 0.145, len * 0.165);
+      const cxn = W * 0.45;
+      const cyn = H * 0.40 + rad * 0.25;
 
       cx.fillStyle = 'rgba(0,0,0,0.28)';
       cx.beginPath();
@@ -1602,7 +1657,8 @@ export function HMIPanel({ onPageChange }: HMIPanelProps = {}) {
       ctx.fillStyle = '#88aa88'; ctx.beginPath();
       for (let i = 0; i < 6; i++) {
         const ha = (i / 6) * Math.PI * 2, hx = cx0 + Math.cos(ha) * fR * 0.1, hy = cy0 + Math.sin(ha) * fR * 0.1;
-        i === 0 ? ctx.moveTo(hx, hy) : ctx.lineTo(hx, hy);
+        if (i === 0) ctx.moveTo(hx, hy);
+        else ctx.lineTo(hx, hy);
       }
       ctx.closePath(); ctx.fill(); ctx.strokeStyle = '#0a3a0a'; ctx.lineWidth = 1; ctx.stroke();
       ctx.beginPath();
@@ -2211,7 +2267,7 @@ export function HMIPanel({ onPageChange }: HMIPanelProps = {}) {
   );
 
   return (
-    <div ref={rootRef} className="hmi-root">
+    <div ref={rootRef} className={`hmi-root${page === 'home' ? ' hmi-home' : ''}`}>
       <div className="topbar">
         <div className="tb-left">
           <div className="lbl-status">SYSTEM STATUS</div>
