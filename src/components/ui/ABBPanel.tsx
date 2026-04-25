@@ -154,11 +154,13 @@ function AbbDriveArrow({
   y = 0,
   mirrored = false,
   slashed = false,
+  broken = false,
 }: {
   x?: number;
   y?: number;
   mirrored?: boolean;
   slashed?: boolean;
+  broken?: boolean;
 }) {
   return (
     <g transform={`translate(${x} ${y}) ${mirrored ? 'translate(12 0) scale(-1 1)' : ''}`}>
@@ -169,11 +171,20 @@ function AbbDriveArrow({
         strokeWidth="3.35"
         strokeLinecap="butt"
         strokeLinejoin="round"
+        strokeDasharray={broken ? '4.2 2.7' : undefined}
       />
       <path
         d="M10.7 0.8H15.3V7.4H8.8L12 4.2C10.3 2.8 7.7 2.7 5.7 4.4L3.7 2.1C6-0.1 8.9-0.3 10.7 0.8Z"
         fill={C.dispText}
       />
+      {broken && (
+        <path
+          d="M9.4 1.2 13.4 5.2"
+          stroke={C.dispBg}
+          strokeWidth="2.35"
+          strokeLinecap="round"
+        />
+      )}
       {slashed && (
         <path
           d="M2.1 1.6 11.7 14.8"
@@ -186,12 +197,24 @@ function AbbDriveArrow({
   );
 }
 
-function AbbReferenceLink({ dashed = false }: { dashed?: boolean }) {
+function AbbRunningNotAtReferenceGlyph() {
+  return <AbbDriveArrow x={7} y={4} broken />;
+}
+
+function AbbPidSleepGlyph() {
   return (
-    <g fill="none" stroke={C.dispText} strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75">
-      <path d="M9.5 12H15" strokeDasharray={dashed ? '1.3 1.4' : undefined} />
-      <path d="M10.1 9.9 8 12l2.1 2.1" />
-      <path d="M14.4 9.9 16.5 12l-2.1 2.1" />
+    <g
+      fill={C.dispText}
+      fontFamily='"Arial Black", Impact, Arial, sans-serif'
+      fontWeight={900}
+      fontStyle="italic"
+      stroke={C.dispText}
+      strokeWidth="0.55"
+      paintOrder="stroke"
+    >
+      <text x="1.5" y="11.3" fontSize="13.5">Z</text>
+      <text x="8.2" y="17.3" fontSize="10.8">Z</text>
+      <text x="15.0" y="22.0" fontSize="8.4">Z</text>
     </g>
   );
 }
@@ -200,7 +223,9 @@ function StatusIcon({ iconState }: { iconState: DriveStatusIconState }) {
   const animated = ABB_STATUS_ICON_STATES[iconState].animation;
   const isRotating = animated === 'rotate';
   const isBlinking = animated === 'blink';
-  const faultColor = '#111';
+  const alternatesStartInhibited = iconState === 'startCommandInhibited';
+  const alternatesFaulted = iconState === 'faulted';
+  const blinksStoppedToBlank = iconState === 'runningZeroReference';
 
   return (
     <span
@@ -212,7 +237,7 @@ function StatusIcon({ iconState }: { iconState: DriveStatusIconState }) {
         height: '1.32em',
         alignItems: 'center',
         justifyContent: 'center',
-        animation: isBlinking ? 'abb-status-blink 0.8s steps(2, end) infinite' : undefined,
+        animation: isBlinking && !alternatesStartInhibited && !alternatesFaulted && !blinksStoppedToBlank ? 'abb-status-blink 0.8s steps(2, end) infinite' : undefined,
       }}
     >
       <svg
@@ -227,9 +252,18 @@ function StatusIcon({ iconState }: { iconState: DriveStatusIconState }) {
         <style>{`
           @keyframes abb-status-rotate { to { transform: rotate(360deg); } }
           @keyframes abb-status-blink { 50% { opacity: 0.18; } }
+          @keyframes abb-status-show-stopped { 0%, 49.9% { opacity: 1; } 50%, 100% { opacity: 0; } }
+          @keyframes abb-status-show-inhibited { 0%, 49.9% { opacity: 0; } 50%, 100% { opacity: 1; } }
+          @keyframes abb-status-show-fault-x { 0%, 49.9% { opacity: 0; } 50%, 100% { opacity: 1; } }
         `}</style>
 
-        {(iconState === 'runningAtReference' || iconState === 'runningNotAtReference' || iconState === 'runningZeroReference') && (
+        {iconState === 'runningZeroReference' && (
+          <g style={{ animation: 'abb-status-show-stopped 0.8s steps(1, end) infinite' }}>
+            <AbbDriveArrow x={7} y={4} />
+          </g>
+        )}
+
+        {(iconState === 'runningAtReference' || iconState === 'runningNotAtReference') && (
           <g
             style={{
               animation: isRotating ? 'abb-status-rotate 1.35s linear infinite' : undefined,
@@ -237,54 +271,43 @@ function StatusIcon({ iconState }: { iconState: DriveStatusIconState }) {
             }}
           >
             {iconState === 'runningNotAtReference' ? (
-              <>
-                <AbbDriveArrow x={2} y={4} />
-                <AbbReferenceLink dashed />
-                <AbbDriveArrow x={12} y={4} mirrored />
-              </>
+              <AbbRunningNotAtReferenceGlyph />
             ) : (
-              <>
-                <AbbDriveArrow x={2} y={4} />
-                <AbbReferenceLink />
-                {iconState === 'runningZeroReference' ? (
-                  <path
-                    d="M18 8.8v6.4"
-                    stroke={C.dispText}
-                    strokeWidth="2.1"
-                    strokeLinecap="round"
-                  />
-                ) : (
-                  <AbbDriveArrow x={12} y={4} />
-                )}
-              </>
+              <AbbDriveArrow x={7} y={4} />
             )}
           </g>
         )}
 
         {(iconState === 'stopped' || iconState === 'stoppedStartInhibited' || iconState === 'startCommandInhibited') && (
           iconState === 'startCommandInhibited' ? (
-            <g>
-              <AbbDriveArrow x={2} y={4} />
-              <AbbReferenceLink />
-              <AbbDriveArrow x={12} y={4} mirrored slashed />
-            </g>
+            <>
+              <g style={{ animation: 'abb-status-show-stopped 0.8s steps(1, end) infinite' }}>
+                <AbbDriveArrow x={7} y={4} />
+              </g>
+              <g style={{ animation: 'abb-status-show-inhibited 0.8s steps(1, end) infinite' }}>
+                <AbbDriveArrow x={7} y={4} slashed />
+              </g>
+            </>
           ) : (
             <AbbDriveArrow x={7} y={4} slashed={iconState === 'stoppedStartInhibited'} />
           )
         )}
 
         {iconState === 'faulted' && (
-          <g>
-            <AbbDriveArrow x={2} y={4} mirrored />
-            <AbbReferenceLink />
-            <circle cx="18.3" cy="12" r="3.4" fill="none" stroke={faultColor} strokeWidth="1.8" />
-            <path
-              d="M16.6 10.3 20 13.7 M20 10.3 16.6 13.7"
-              stroke={faultColor}
-              strokeWidth="1.55"
-              strokeLinecap="round"
-            />
-          </g>
+          <>
+            <g style={{ animation: 'abb-status-show-stopped 0.8s steps(1, end) infinite' }}>
+              <AbbDriveArrow x={7} y={4} />
+            </g>
+            <g style={{ animation: 'abb-status-show-fault-x 0.8s steps(1, end) infinite' }}>
+              <circle cx="12" cy="12" r="6.2" fill={C.dispText} />
+              <path
+                d="M9.3 9.3 14.7 14.7 M14.7 9.3 9.3 14.7"
+                stroke={C.dispBg}
+                strokeWidth="2.05"
+                strokeLinecap="round"
+              />
+            </g>
+          </>
         )}
 
         {iconState === 'preHeating' && (
@@ -296,10 +319,7 @@ function StatusIcon({ iconState }: { iconState: DriveStatusIconState }) {
         )}
 
         {iconState === 'pidSleep' && (
-          <g fill={C.dispText}>
-            <path d="M6 7h8.2l-5.8 7H14v3H5.4l5.8-7H6Z" />
-            <path d="M15.6 4h5.2l-3.5 4.2h3.4v2h-5.5l3.5-4.2h-3.1Z" opacity="0.78" />
-          </g>
+          <AbbPidSleepGlyph />
         )}
       </svg>
     </span>
@@ -645,10 +665,13 @@ function StatusIconReference() {
     <div
       aria-label="ABB status icon states"
       style={{
-        position: 'absolute',
-        left: '102%',
-        top: '18%',
-        width: 280,
+        position: 'fixed',
+        right: 18,
+        top: 64,
+        width: 'min(320px, calc(100vw - 36px))',
+        maxHeight: 'calc(100vh - 86px)',
+        overflowY: 'auto',
+        boxSizing: 'border-box',
         zIndex: 42,
         padding: 12,
         borderRadius: 16,
@@ -679,8 +702,8 @@ function StatusIconReference() {
               key={iconState}
               style={{
                 display: 'grid',
-                gridTemplateColumns: '36px 1fr auto',
-                alignItems: 'center',
+                gridTemplateColumns: '36px minmax(0, 1fr) max-content',
+                alignItems: 'start',
                 gap: 8,
                 padding: '7px 8px',
                 borderRadius: 10,
@@ -706,11 +729,15 @@ function StatusIconReference() {
                 minWidth: 0,
                 fontSize: 12,
                 fontWeight: 800,
-                lineHeight: 1.1,
+                lineHeight: 1.18,
+                overflowWrap: 'anywhere',
+                wordBreak: 'normal',
+                whiteSpace: 'normal',
               }}>
                 {state.label}
               </span>
               <span style={{
+                alignSelf: 'start',
                 padding: '3px 5px',
                 borderRadius: 999,
                 background: state.animation === 'none' ? '#2a2a2a' : state.animation === 'blink' ? '#5e3d18' : '#244526',
