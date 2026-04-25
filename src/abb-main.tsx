@@ -3,6 +3,7 @@
    Right half: live React-rendered ABB ACH580 panel simulation.
    Both halves stay in sync visually so it's easy to spot differences. */
 
+import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';
 import { ABBPanel } from './components/ui/ABBPanel';
@@ -19,6 +20,46 @@ const S = {
     overflow: 'hidden',
     fontFamily: 'Arial, sans-serif',
   } satisfies React.CSSProperties,
+
+  toolbar: {
+    position: 'fixed',
+    top: 14,
+    right: 18,
+    zIndex: 20,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    padding: '8px 10px',
+    border: '1px solid #242424',
+    borderRadius: 999,
+    background: 'rgba(12, 12, 12, 0.82)',
+    boxShadow: '0 10px 30px rgba(0,0,0,0.38)',
+    color: '#d8d8d8',
+    fontSize: 10,
+    letterSpacing: '1.3px',
+    textTransform: 'uppercase' as const,
+    userSelect: 'none' as const,
+  } satisfies React.CSSProperties,
+
+  toggleGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 7,
+  } satisfies React.CSSProperties,
+
+  toggleButton: (active: boolean): React.CSSProperties => ({
+    border: '1px solid #343434',
+    borderRadius: 999,
+    padding: '6px 10px',
+    background: active ? '#f4d35e' : '#191919',
+    color: active ? '#121212' : '#bcbcbc',
+    fontSize: 10,
+    fontWeight: 800,
+    letterSpacing: '1.2px',
+    textTransform: 'uppercase',
+    cursor: 'pointer',
+    boxShadow: active ? '0 0 18px rgba(244, 211, 94, 0.28)' : 'none',
+  }),
 
   panel: {
     flex: 1,
@@ -97,9 +138,37 @@ const S = {
 } as const;
 
 /* ── Comparison app ──────────────────────────────────────────────────── */
-function AbbCompareApp() {
+export function AbbCompareApp() {
+  const [showControlLabels, setShowControlLabels] = useState(false);
+  const [showStatusIconStates, setShowStatusIconStates] = useState(false);
+
   return (
     <div style={S.root}>
+      <div style={S.toolbar}>
+        <span style={S.toggleGroup}>
+          Control labels
+          <button
+            type="button"
+            aria-pressed={showControlLabels}
+            onClick={() => setShowControlLabels((shown) => !shown)}
+            style={S.toggleButton(showControlLabels)}
+          >
+            {showControlLabels ? 'Shown' : 'Hidden'}
+          </button>
+        </span>
+        <span style={S.toggleGroup}>
+          Status icons
+          <button
+            type="button"
+            aria-pressed={showStatusIconStates}
+            onClick={() => setShowStatusIconStates((shown) => !shown)}
+            style={S.toggleButton(showStatusIconStates)}
+          >
+            {showStatusIconStates ? 'Shown' : 'Hidden'}
+          </button>
+        </span>
+      </div>
+
       {/* ── Left: reference photograph ── */}
       <div style={S.panel}>
         <div style={S.badge}>
@@ -124,7 +193,10 @@ function AbbCompareApp() {
         </div>
 
         <div style={S.simWrapper}>
-          <ABBPanel />
+          <ABBPanel
+            showControlLabels={showControlLabels}
+            showStatusIconStates={showStatusIconStates}
+          />
         </div>
 
         <div style={S.pageLabel}>Interactive — Start / Stop / Nav</div>

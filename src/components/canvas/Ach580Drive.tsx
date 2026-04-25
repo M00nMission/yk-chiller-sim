@@ -5,7 +5,7 @@
    commercial chiller plant). Designed to be mounted on the door of a
    packaged-drive cabinet so the drive itself is the visible operator
    interface, with a recessed mount for the ABB ACH580 control panel
-   (an ABB ACH-AP-H Assistant Control Panel — see <AbbAch580ControlPanel/>)
+   (the refined ABB ACH580 panel UI — see <ABBPanel/>)
    that hosts the live operator interface as an Html overlay.
 
    Frame geometry (based on the ABB ACH580 dimensional drawings on
@@ -40,10 +40,10 @@ import { useRef, type MutableRefObject } from 'react';
 import { Html, Text } from '@react-three/drei';
 import * as THREE from 'three';
 import {
-  AbbAch580ControlPanel,
-  ABB_ACH580_PANEL_DESIGN_W,
-  ABB_ACH580_PANEL_DESIGN_H,
-} from '../ui/AbbAch580ControlPanel';
+  ABBPanel,
+  ABB_PANEL_DESIGN_W,
+  ABB_PANEL_DESIGN_H,
+} from '../ui/ABBPanel';
 
 /* ─── One-time CSS injection ─────────────────────────────────────────────────
    Promote the CSS3D wrapper of every ABB control panel to its own GPU
@@ -125,19 +125,19 @@ export interface Ach580DriveProps {
    text on the LCD and the function keys unreadable / unclickable when
    the operator is even a metre away, so we draw it dramatically larger
    (~0.30 m tall) on the drive face — still proportional to the actual
-   ACH-AP-H aspect, but big enough that the LOC/REM, HAND/OFF/AUTO and
-   START/STOP keys are usable at the eye-level mount and the LCD text
+   ACH580 panel aspect, but big enough that the LOC/REM, START/STOP,
+   arrow, and soft keys are usable at the eye-level mount and the LCD text
    is legible from a couple of metres back. World height is the single
    source of truth; world width follows from the design canvas aspect. */
 const ACP_WORLD_H = 0.30;   // 300 mm vertical span on the drive front
-const ACP_WORLD_W = ACP_WORLD_H * (ABB_ACH580_PANEL_DESIGN_W / ABB_ACH580_PANEL_DESIGN_H);
+const ACP_WORLD_W = ACP_WORLD_H * (ABB_PANEL_DESIGN_W / ABB_PANEL_DESIGN_H);
 
 /* Fixed world-space scale for the <Html transform> overlay. This is
    computed ONCE (not per-frame from camera distance), which is what
    eliminates the "panel slides out of place during walking and snaps
    back when you stop" artifact that drei's Html transform mode otherwise
    exhibits when `distanceFactor` is recomputed every frame. */
-const ACP_HTML_SCALE = ACP_WORLD_H / ABB_ACH580_PANEL_DESIGN_H;
+const ACP_HTML_SCALE = ACP_WORLD_H / ABB_PANEL_DESIGN_H;
 
 export function Ach580Drive({
   position = [0, 0, 0],
@@ -508,8 +508,8 @@ export function Ach580Drive({
           wrapperClass="abb-ach580-stable-html"
           zIndexRange={[28, 1]}
           style={{
-            width:  `${ABB_ACH580_PANEL_DESIGN_W}px`,
-            height: `${ABB_ACH580_PANEL_DESIGN_H}px`,
+            width:  `${ABB_PANEL_DESIGN_W}px`,
+            height: `${ABB_PANEL_DESIGN_H}px`,
             pointerEvents: 'auto',
             overflow: 'hidden',
             willChange: 'transform',
@@ -517,7 +517,7 @@ export function Ach580Drive({
           }}
         >
           <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-            <AbbAch580ControlPanel running={!!running} pumpTag={tag} />
+            <ABBPanel running={!!running} />
             {onZoom && !zoomed && (
               <div
                 role="button"
@@ -588,6 +588,7 @@ export function Ach580Drive({
        sync with the default `width`/`height`/`depth` parameters of
        <Ach580Drive/> above — PumpAssemblies.tsx solves the eye-level
        mount height from these numbers. */
+// eslint-disable-next-line react-refresh/only-export-components
 export function getAch580DefaultExtents() {
   return { width: 0.42, height: 0.96, depth: 0.20 };
 }

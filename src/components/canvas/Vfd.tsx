@@ -12,8 +12,7 @@
      • door-mounted operator interface:
          – status lamp stack (RUN/READY/FAULT)
          – Hand-Off-Auto cam switch
-         – full-color graphic HMI (live React VfdHMI overlay with Home,
-           Meters, Programming, I/O, Faults, and Trend pages)
+        – ABB ACH580-style assistant panel (live React ABBPanel overlay)
          – START / STOP / RESET pushbuttons
          – E-Stop mushroom
      • UL nameplate + warning labels
@@ -38,7 +37,11 @@
 import { Text, Billboard, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { useMemo, useRef, type RefObject, type MutableRefObject } from 'react';
-import { VfdHMI, VFD_HMI_ASPECT_RATIO } from '../ui/VfdHMI';
+import {
+  ABBPanel,
+  ABB_PANEL_DESIGN_W,
+  ABB_PANEL_DESIGN_H,
+} from '../ui/ABBPanel';
 
 type Triple = [number, number, number];
 
@@ -291,7 +294,7 @@ export function Vfd({
           Layout, top → bottom on the upper door:
             (1) Status / mode lamp stack
             (2) HOA selector switch (Hand-Off-Auto)
-            (3) Door-mounted graphic HMI (VfdHMI)
+            (3) Door-mounted ABB ACH580 assistant panel
             (4) START / STOP / RESET pushbuttons
             (5) E-Stop mushroom
             (6) Nameplate / warning labels
@@ -372,23 +375,18 @@ export function Vfd({
         </Billboard>
       </group>
 
-      {/* (3) DRIVE HMI — compact door-mounted graphic operator interface.
-             A genuine TFT panel, not a vacuum-fluorescent character display
-             (real OptiSpeed™ Color Graphic HMIs are 10–12" diagonal). The
-             entire React VfdHMI page-set (Home / Meters / Programming /
-             I-O / Faults / Trend) is mounted here using the same
-             <Html transform/> pattern the chiller's OptiView panel uses. */}
+      {/* (3) ABB ACH580 assistant panel — portrait React overlay mounted on
+             the VFD cabinet door so the plant view uses the same refined ABB
+             keypad/control-panel component as the standalone comparison. */}
       <group ref={screenAnchorRef} position={[FRONT_X + 0.012, cabY + UPPER_CY + 0.10, 0]}>
-        {/* Bezel matches VFD_HMI design aspect (1100:750); Html viewport uses the
-            same ratio so VfdHMI uniform-scales with no letterboxing inside Html. */}
+        {/* Bezel matches ABBPanel's portrait aspect. */}
         {(() => {
-          /* Larger door graphic + Html viewport so the operator UI reads
-             clearly at normal orbit; bezel and pixel size stay matched. */
-          const bezelH = 0.112;
-          const bezelW = bezelH * VFD_HMI_ASPECT_RATIO;
-          const inset = 0.014;
-          const HMI_PX_H = 124;
-          const HMI_PX_W = Math.round(HMI_PX_H * VFD_HMI_ASPECT_RATIO);
+          const panelAspect = ABB_PANEL_DESIGN_W / ABB_PANEL_DESIGN_H;
+          const bezelH = 0.46;
+          const bezelW = bezelH * panelAspect;
+          const inset = 0.020;
+          const HMI_PX_H = ABB_PANEL_DESIGN_H;
+          const HMI_PX_W = ABB_PANEL_DESIGN_W;
           const fz = (bezelW / 2) * 0.86;
           const fy = (bezelH / 2) * 0.86;
           return (
@@ -423,7 +421,7 @@ export function Vfd({
                   transform
                   occlude={[occluderRef]}
                   position={[0, 0, 0.007]}
-                  distanceFactor={1.02}
+                  scale={bezelH / ABB_PANEL_DESIGN_H}
                   zIndexRange={[28, 1]}
                   style={{
                     width: `${HMI_PX_W}px`,
@@ -437,11 +435,11 @@ export function Vfd({
                       position: 'relative',
                       width: '100%',
                       height: '100%',
-                      borderRadius: 2,
+                      borderRadius: 4,
                       overflow: 'hidden',
                     }}
                   >
-                    <VfdHMI running={running} />
+                    <ABBPanel running={running} />
                     {onZoom && !zoomed && (
                       <div
                         role="button"

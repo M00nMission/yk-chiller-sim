@@ -8,6 +8,16 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 /* ── Types ─────────────────────────────────────────────────────────── */
 export type DriveState = 'stopped' | 'running' | 'faulted';
 export type ControlLocation = 'Local' | 'Remote' | 'Fieldbus';
+export type DriveStatusIconState =
+  | 'stopped'
+  | 'stoppedStartInhibited'
+  | 'startCommandInhibited'
+  | 'faulted'
+  | 'runningZeroReference'
+  | 'runningNotAtReference'
+  | 'runningAtReference'
+  | 'preHeating'
+  | 'pidSleep';
 
 interface Param {
   name: string;
@@ -29,6 +39,54 @@ const BASE_PARAMS: Param[] = [
 ];
 
 const VISIBLE_ROWS = 3;
+
+export const ABB_PANEL_DESIGN_W = 576;
+export const ABB_PANEL_DESIGN_H = 1024;
+
+interface ControlLabel {
+  id: number;
+  text: string;
+  target: { x: number; y: number };
+  label: { x: number; y: number };
+  align?: 'left' | 'center' | 'right';
+}
+
+const CONTROL_LABELS: ControlLabel[] = [
+  { id: 1, text: 'Display', target: { x: 50.0, y: 32.8 }, label: { x: 103, y: 24 }, align: 'left' },
+  { id: 2, text: 'Left softkey', target: { x: 21.1, y: 55.7 }, label: { x: -6, y: 50 }, align: 'right' },
+  { id: 3, text: 'Right softkey', target: { x: 78.9, y: 55.7 }, label: { x: 106, y: 50 }, align: 'left' },
+  { id: 4, text: 'Status LED', target: { x: 10.1, y: 62.8 }, label: { x: -6, y: 64 }, align: 'right' },
+  { id: 5, text: 'Help', target: { x: 89.0, y: 69.0 }, label: { x: 106, y: 70 }, align: 'left' },
+  { id: 6, text: 'Arrow keys', target: { x: 50.0, y: 70.3 }, label: { x: 104, y: 61 }, align: 'left' },
+  { id: 7, text: 'Stop', target: { x: 21.9, y: 83.1 }, label: { x: -6, y: 83 }, align: 'right' },
+  { id: 8, text: 'Start', target: { x: 78.1, y: 83.1 }, label: { x: 106, y: 83 }, align: 'left' },
+  { id: 9, text: 'Local / Remote', target: { x: 50.0, y: 85.6 }, label: { x: 50, y: 99 }, align: 'center' },
+  { id: 10, text: 'USB connector', target: { x: 50.0, y: 94.8 }, label: { x: 50, y: 108 }, align: 'center' },
+];
+
+const ABB_STATUS_ICON_STATES: Record<DriveStatusIconState, { label: string; animation: 'none' | 'blink' | 'rotate' }> = {
+  stopped:                 { label: 'Stopped', animation: 'none' },
+  stoppedStartInhibited:   { label: 'Stopped, start inhibited', animation: 'none' },
+  startCommandInhibited:   { label: 'Stopped, start command given but start inhibited', animation: 'blink' },
+  faulted:                 { label: 'Faulted', animation: 'blink' },
+  runningZeroReference:    { label: 'Running, at reference, but the reference value is 0', animation: 'blink' },
+  runningNotAtReference:   { label: 'Running, not at reference', animation: 'rotate' },
+  runningAtReference:      { label: 'Running, at reference', animation: 'rotate' },
+  preHeating:              { label: 'Pre-heating (motor heating) active', animation: 'none' },
+  pidSleep:                { label: 'PID sleep mode active', animation: 'none' },
+};
+
+const ABB_STATUS_ICON_STATE_ORDER: DriveStatusIconState[] = [
+  'stopped',
+  'stoppedStartInhibited',
+  'startCommandInhibited',
+  'faulted',
+  'runningZeroReference',
+  'runningNotAtReference',
+  'runningAtReference',
+  'preHeating',
+  'pidSleep',
+];
 
 /* ── Colour palette — matches ACH580 hardware ───────────────────────── */
 const C = {
@@ -91,16 +149,173 @@ function UsbIcon() {
   );
 }
 
+function AbbDriveArrow({
+  x = 0,
+  y = 0,
+  mirrored = false,
+  slashed = false,
+}: {
+  x?: number;
+  y?: number;
+  mirrored?: boolean;
+  slashed?: boolean;
+}) {
+  return (
+    <g transform={`translate(${x} ${y}) ${mirrored ? 'translate(12 0) scale(-1 1)' : ''}`}>
+      <path
+        d="M3.1 14.2C0.9 10.8 1.4 6.1 4.4 3.3C7.1 0.9 10.7 1 13.1 2.9"
+        fill="none"
+        stroke={C.dispText}
+        strokeWidth="3.35"
+        strokeLinecap="butt"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M10.7 0.8H15.3V7.4H8.8L12 4.2C10.3 2.8 7.7 2.7 5.7 4.4L3.7 2.1C6-0.1 8.9-0.3 10.7 0.8Z"
+        fill={C.dispText}
+      />
+      {slashed && (
+        <path
+          d="M2.1 1.6 11.7 14.8"
+          stroke={C.dispText}
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      )}
+    </g>
+  );
+}
+
+function AbbReferenceLink({ dashed = false }: { dashed?: boolean }) {
+  return (
+    <g fill="none" stroke={C.dispText} strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75">
+      <path d="M9.5 12H15" strokeDasharray={dashed ? '1.3 1.4' : undefined} />
+      <path d="M10.1 9.9 8 12l2.1 2.1" />
+      <path d="M14.4 9.9 16.5 12l-2.1 2.1" />
+    </g>
+  );
+}
+
+function StatusIcon({ iconState }: { iconState: DriveStatusIconState }) {
+  const animated = ABB_STATUS_ICON_STATES[iconState].animation;
+  const isRotating = animated === 'rotate';
+  const isBlinking = animated === 'blink';
+  const faultColor = '#111';
+
+  return (
+    <span
+      title={ABB_STATUS_ICON_STATES[iconState].label}
+      aria-label={ABB_STATUS_ICON_STATES[iconState].label}
+      style={{
+        display: 'inline-flex',
+        width: '1.32em',
+        height: '1.32em',
+        alignItems: 'center',
+        justifyContent: 'center',
+        animation: isBlinking ? 'abb-status-blink 0.8s steps(2, end) infinite' : undefined,
+      }}
+    >
+      <svg
+        viewBox="0 0 24 24"
+        style={{
+          width: '100%',
+          height: '100%',
+          display: 'block',
+          overflow: 'visible',
+        }}
+      >
+        <style>{`
+          @keyframes abb-status-rotate { to { transform: rotate(360deg); } }
+          @keyframes abb-status-blink { 50% { opacity: 0.18; } }
+        `}</style>
+
+        {(iconState === 'runningAtReference' || iconState === 'runningNotAtReference' || iconState === 'runningZeroReference') && (
+          <g
+            style={{
+              animation: isRotating ? 'abb-status-rotate 1.35s linear infinite' : undefined,
+              transformOrigin: '12px 12px',
+            }}
+          >
+            {iconState === 'runningNotAtReference' ? (
+              <>
+                <AbbDriveArrow x={2} y={4} />
+                <AbbReferenceLink dashed />
+                <AbbDriveArrow x={12} y={4} mirrored />
+              </>
+            ) : (
+              <>
+                <AbbDriveArrow x={2} y={4} />
+                <AbbReferenceLink />
+                {iconState === 'runningZeroReference' ? (
+                  <path
+                    d="M18 8.8v6.4"
+                    stroke={C.dispText}
+                    strokeWidth="2.1"
+                    strokeLinecap="round"
+                  />
+                ) : (
+                  <AbbDriveArrow x={12} y={4} />
+                )}
+              </>
+            )}
+          </g>
+        )}
+
+        {(iconState === 'stopped' || iconState === 'stoppedStartInhibited' || iconState === 'startCommandInhibited') && (
+          iconState === 'startCommandInhibited' ? (
+            <g>
+              <AbbDriveArrow x={2} y={4} />
+              <AbbReferenceLink />
+              <AbbDriveArrow x={12} y={4} mirrored slashed />
+            </g>
+          ) : (
+            <AbbDriveArrow x={7} y={4} slashed={iconState === 'stoppedStartInhibited'} />
+          )
+        )}
+
+        {iconState === 'faulted' && (
+          <g>
+            <AbbDriveArrow x={2} y={4} mirrored />
+            <AbbReferenceLink />
+            <circle cx="18.3" cy="12" r="3.4" fill="none" stroke={faultColor} strokeWidth="1.8" />
+            <path
+              d="M16.6 10.3 20 13.7 M20 10.3 16.6 13.7"
+              stroke={faultColor}
+              strokeWidth="1.55"
+              strokeLinecap="round"
+            />
+          </g>
+        )}
+
+        {iconState === 'preHeating' && (
+          <g fill="none" stroke={C.dispText} strokeLinecap="round" strokeWidth="2">
+            <path d="M8 18c-1.4-1.5-1.4-3.2 0-5s1.4-3.5 0-5" />
+            <path d="M12 18c-1.4-1.5-1.4-3.2 0-5s1.4-3.5 0-5" />
+            <path d="M16 18c-1.4-1.5-1.4-3.2 0-5s1.4-3.5 0-5" />
+          </g>
+        )}
+
+        {iconState === 'pidSleep' && (
+          <g fill={C.dispText}>
+            <path d="M6 7h8.2l-5.8 7H14v3H5.4l5.8-7H6Z" />
+            <path d="M15.6 4h5.2l-3.5 4.2h3.4v2h-5.5l3.5-4.2h-3.1Z" opacity="0.78" />
+          </g>
+        )}
+      </svg>
+    </span>
+  );
+}
+
 interface DisplayProps {
   params:    Param[];
   topRow:    number;
   selected:  number;
-  state:     DriveState;
+  statusIconState: DriveStatusIconState;
   control:   ControlLocation;
   setpoint:  number;
 }
 
-function Display({ params, topRow, selected, state, control, setpoint }: DisplayProps) {
+function Display({ params, topRow, selected, statusIconState, control, setpoint }: DisplayProps) {
   const [time, setTime] = useState(clock);
   useEffect(() => {
     const id = setInterval(() => setTime(clock()), 10_000);
@@ -108,8 +323,6 @@ function Display({ params, topRow, selected, state, control, setpoint }: Display
   }, []);
 
   const displayedParams = params.slice(topRow, topRow + VISIBLE_ROWS);
-
-  const rotIcon = state === 'running' ? '↻' : '○';
 
   return (
     <div style={{
@@ -134,7 +347,7 @@ function Display({ params, topRow, selected, state, control, setpoint }: Display
       {/* Status row */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: '1fr auto 1fr',
+        gridTemplateColumns: '1fr auto',
         alignItems: 'center',
         fontSize: 'clamp(15px, 5.15cqw, 22px)',
         lineHeight: 1,
@@ -142,9 +355,18 @@ function Display({ params, topRow, selected, state, control, setpoint }: Display
         padding: '3px 6px 4px',
         fontWeight: 800,
         letterSpacing: '-0.045em',
+        position: 'relative',
       }}>
         <span style={{ fontWeight: 'bold' }}>{control}</span>
-        <span style={{ fontSize: '1.15em', transform: state === 'running' ? 'rotate(-20deg)' : undefined }}>{rotIcon}</span>
+        <span style={{
+          position: 'absolute',
+          left: '23.5%',
+          top: '50%',
+          transform: 'translate(-50%, -50%)',
+          display: 'inline-flex',
+        }}>
+          <StatusIcon iconState={statusIconState} />
+        </span>
         <span style={{
           fontWeight: 'bold',
           textAlign: 'right',
@@ -300,15 +522,235 @@ function SoftKeyButton({ side }: { side: 'left' | 'right' }) {
   );
 }
 
+function ControlLabelOverlay() {
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        position: 'absolute',
+        inset: 0,
+        zIndex: 40,
+        pointerEvents: 'none',
+      }}
+    >
+      <svg
+        viewBox="0 0 100 100"
+        preserveAspectRatio="none"
+        style={{
+          position: 'absolute',
+          inset: 0,
+          overflow: 'visible',
+          filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.45))',
+        }}
+      >
+        <defs>
+          <marker
+            id="abb-control-label-arrow"
+            markerWidth="7"
+            markerHeight="7"
+            refX="6"
+            refY="3.5"
+            orient="auto"
+            markerUnits="strokeWidth"
+          >
+            <path d="M0,0 L7,3.5 L0,7 Z" fill="#f4d35e" />
+          </marker>
+        </defs>
+        {CONTROL_LABELS.map(({ id, target, label }) => (
+          <line
+            key={`label-leader-${id}`}
+            x1={label.x}
+            y1={label.y}
+            x2={target.x}
+            y2={target.y}
+            stroke="#f4d35e"
+            strokeWidth="0.42"
+            strokeLinecap="round"
+            markerEnd="url(#abb-control-label-arrow)"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+      </svg>
+
+      {CONTROL_LABELS.map(({ id, text, target, label, align = 'left' }) => (
+        <div key={`label-${id}`}>
+          <span
+            style={{
+              position: 'absolute',
+              left: `${target.x}%`,
+              top: `${target.y}%`,
+              width: 10,
+              height: 10,
+              transform: 'translate(-50%, -50%)',
+              borderRadius: '50%',
+              background: '#f4d35e',
+              border: '2px solid #111',
+              boxShadow: '0 0 0 2px rgba(244,211,94,0.35), 0 0 12px rgba(244,211,94,0.45)',
+            }}
+          />
+          <span
+            style={{
+              position: 'absolute',
+              left: `${label.x}%`,
+              top: `${label.y}%`,
+              transform: align === 'center'
+                ? 'translate(-50%, -50%)'
+                : align === 'right'
+                  ? 'translate(-100%, -50%)'
+                  : 'translate(0, -50%)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '5px 7px 5px 5px',
+              borderRadius: 999,
+              background: 'rgba(12, 12, 10, 0.88)',
+              border: '1px solid rgba(244, 211, 94, 0.72)',
+              color: '#fff9d4',
+              fontFamily: '"Arial Narrow", Arial, sans-serif',
+              fontSize: 13,
+              fontWeight: 800,
+              letterSpacing: '0.01em',
+              lineHeight: 1,
+              whiteSpace: 'nowrap',
+              textShadow: '0 1px 2px #000',
+            }}
+          >
+            <strong
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 17,
+                height: 17,
+                borderRadius: '50%',
+                background: '#f4d35e',
+                color: '#121212',
+                fontSize: 11,
+                fontWeight: 900,
+                textShadow: 'none',
+              }}
+            >
+              {id}
+            </strong>
+            {text}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StatusIconReference() {
+  return (
+    <div
+      aria-label="ABB status icon states"
+      style={{
+        position: 'absolute',
+        left: '102%',
+        top: '18%',
+        width: 280,
+        zIndex: 42,
+        padding: 12,
+        borderRadius: 16,
+        background: 'rgba(9, 10, 10, 0.92)',
+        border: '1px solid rgba(244, 211, 94, 0.42)',
+        boxShadow: '0 18px 42px rgba(0,0,0,0.45)',
+        color: '#f1f1e6',
+        fontFamily: '"Arial Narrow", Arial, sans-serif',
+        pointerEvents: 'none',
+      }}
+    >
+      <div style={{
+        marginBottom: 10,
+        color: '#f4d35e',
+        fontSize: 12,
+        fontWeight: 900,
+        letterSpacing: '1.5px',
+        textTransform: 'uppercase',
+      }}>
+        Status Icon States
+      </div>
+
+      <div style={{ display: 'grid', gap: 7 }}>
+        {ABB_STATUS_ICON_STATE_ORDER.map((iconState) => {
+          const state = ABB_STATUS_ICON_STATES[iconState];
+          return (
+            <div
+              key={iconState}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '36px 1fr auto',
+                alignItems: 'center',
+                gap: 8,
+                padding: '7px 8px',
+                borderRadius: 10,
+                background: 'rgba(255,255,255,0.055)',
+                border: '1px solid rgba(255,255,255,0.07)',
+              }}
+            >
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 30,
+                height: 30,
+                borderRadius: 7,
+                background: C.dispBg,
+                color: C.dispText,
+                fontSize: 18,
+                boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.32)',
+              }}>
+                <StatusIcon iconState={iconState} />
+              </span>
+              <span style={{
+                minWidth: 0,
+                fontSize: 12,
+                fontWeight: 800,
+                lineHeight: 1.1,
+              }}>
+                {state.label}
+              </span>
+              <span style={{
+                padding: '3px 5px',
+                borderRadius: 999,
+                background: state.animation === 'none' ? '#2a2a2a' : state.animation === 'blink' ? '#5e3d18' : '#244526',
+                color: state.animation === 'none' ? '#cfcfcf' : state.animation === 'blink' ? '#ffd18a' : '#9ff0a8',
+                fontSize: 8,
+                fontWeight: 900,
+                letterSpacing: '0.6px',
+                textTransform: 'uppercase',
+              }}>
+                {state.animation}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /* ── Main Panel ─────────────────────────────────────────────────────── */
-export function ABBPanel() {
+export function ABBPanel({
+  running: runningProp,
+  showControlLabels = false,
+  showStatusIconStates = false,
+}: {
+  running?: boolean;
+  showControlLabels?: boolean;
+  showStatusIconStates?: boolean;
+} = {}) {
   const [params, setParams]     = useState<Param[]>(BASE_PARAMS);
-  const [state, setState]       = useState<DriveState>('stopped');
+  const [localState, setLocalState] = useState<DriveState>(runningProp ? 'running' : 'stopped');
   const [control, setControl]   = useState<ControlLocation>('Local');
   const [topRow, setTopRow]     = useState(0);
   const [selected, setSelected] = useState(0);
   const [setpoint]              = useState(1400.0);
   const animRef                 = useRef<number | null>(null);
+
+  const state: DriveState = typeof runningProp === 'boolean'
+    ? runningProp ? 'running' : 'stopped'
+    : localState;
 
   /* Live parameter animation while running */
   useEffect(() => {
@@ -352,20 +794,27 @@ export function ABBPanel() {
   }, [params.length, maxTop]);
 
   const handleStart = useCallback(() => {
-    if (state !== 'running') setState('running');
-  }, [state]);
+    if (typeof runningProp !== 'boolean') setLocalState('running');
+  }, [runningProp]);
 
   const handleStop = useCallback(() => {
-    setState('stopped');
+    if (typeof runningProp !== 'boolean') setLocalState('stopped');
     /* Decay values gently back toward base when stopped */
     setParams(BASE_PARAMS.map((b, i) => ({ ...b, value: params[i]?.value ?? b.value })));
-  }, [params]);
+  }, [params, runningProp]);
 
   const handleLocRem = useCallback(() => {
     setControl(c => c === 'Local' ? 'Remote' : c === 'Remote' ? 'Fieldbus' : 'Local');
   }, []);
 
   const ledOn = state === 'running';
+  const motorSpeed = params[0]?.value ?? 0;
+  const statusIconState: DriveStatusIconState =
+      state === 'faulted' ? 'faulted'
+    : state !== 'running' ? 'stopped'
+    : setpoint <= 0.05 ? 'runningZeroReference'
+    : Math.abs(motorSpeed - setpoint) <= 30 ? 'runningAtReference'
+    : 'runningNotAtReference';
 
   return (
     <div style={{
@@ -383,6 +832,7 @@ export function ABBPanel() {
         position: 'relative',
         filter: 'drop-shadow(0 24px 42px rgba(0,0,0,0.55))',
         isolation: 'isolate',
+        overflow: 'visible',
       }}>
 
         {/* Top hanger cap visible above the black fascia. */}
@@ -475,7 +925,7 @@ export function ABBPanel() {
             params={params}
             topRow={topRow}
             selected={selected}
-            state={state}
+            statusIconState={statusIconState}
             control={control}
             setpoint={setpoint}
           />
@@ -711,6 +1161,9 @@ export function ABBPanel() {
         }}>
           <UsbIcon />
         </div>
+
+        {showControlLabels && <ControlLabelOverlay />}
+        {showStatusIconStates && <StatusIconReference />}
       </div>
     </div>
   );
